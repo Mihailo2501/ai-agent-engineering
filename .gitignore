@@ -1,0 +1,12 @@
+.DS_Store
+Thumbs.db
+.env
+.env.local
+.env.*.local
+node_modules/
+*.log
+.vscode/
+.idea/
+.cache/
+dist/
+.claude/settings.local.json

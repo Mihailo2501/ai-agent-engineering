@@ -1,0 +1,897 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Module 01 · Primitives</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+<!-- Synchronous globals: must load BEFORE any inline body scripts that use them -->
+<script src="js/progress.js"></script>
+<script src="js/badges.js"></script>
+<script src="js/sandbox-stub.js"></script>
+<script src="js/demo-helpers.js"></script>
+</head>
+<body>
+
+<div class="progress-strip">
+  <a href="index.html" class="progress-strip-home">← course hub</a>
+  <span class="progress-strip-label">module 01 / 13</span>
+  <div class="progress-strip-bar"><div class="progress-strip-fill" id="strip-fill"></div></div>
+  <span class="progress-strip-pct" id="strip-pct">0%</span>
+</div>
+
+<main class="wrap">
+
+  <div class="module-hero">
+    <div class="kicker">Module 01 · Primitives</div>
+    <h1>How an LLM call actually works</h1>
+    <p class="lead">Every agent, every harness, every MCP server, every "managed agent" platform sits on top of one thing: a stateless model call with messages and tools. Understand this layer and the rest is just packaging.</p>
+  </div>
+
+  <div class="toc">
+    <div class="toc-title">In this module</div>
+    <ol>
+      <li><a href="#what-is-llm">What an LLM is, in three minutes</a></li>
+      <li><a href="#api-shape">The shape of an API call</a></li>
+      <li><a href="#roles-blocks">Roles and content blocks</a></li>
+      <li><a href="#sampling">How the model decides</a></li>
+      <li><a href="#tool-use">Tool use</a></li>
+      <li><a href="#agentic-loop">The agentic loop</a></li>
+      <li><a href="#context-window">The context window</a></li>
+      <li><a href="#streaming">Streaming</a></li>
+      <li><a href="#first-agent">Your first 20-line agent</a></li>
+      <li><a href="#potter-angle">Potter angle</a></li>
+      <li><a href="#glossary">Glossary</a></li>
+      <li><a href="#check">Check yourself</a></li>
+      <li><a href="#complete">Mark complete</a></li>
+    </ol>
+  </div>
+
+  <h2 id="what-is-llm">1 · What an LLM is, in three minutes</h2>
+  <p>A large language model is a statistical machine trained to predict the next token given a sequence of previous tokens. <a href="#glossary-token" class="g-link">Tokens</a> are sub-word fragments. The word "Paris" is roughly one token, "Subotica" is two or three. The model has no concept of facts, no concept of time, no internal database. It has a very large set of weights that, given a sequence of tokens, produce a probability distribution over what token comes next.</p>
+
+  <p>That is the entire mechanism. Everything else (reasoning, instruction-following, tool use, agentic behavior) is an emergent property of training that machine on enormous amounts of text and giving it a particular shape of input. The model alone is not an agent. It is a very fast next-token predictor wrapped in an HTTP API.</p>
+
+  <p>Three properties matter for everything in this course:</p>
+  <ul>
+    <li><a href="#glossary-stateless-api" class="g-link"><strong>Stateless.</strong></a> The model has no memory of previous calls. Every API request starts from zero. Whatever the model "knows" about your conversation is whatever you put in the messages array right now.</li>
+    <li><strong>Probabilistic.</strong> Same input does not produce identical output. The same prompt called twice can yield slightly different responses unless you pin sampling parameters carefully.</li>
+    <li><strong>Bounded.</strong> The model has a <a href="#glossary-context-window" class="g-link">context window</a>: a maximum number of tokens it can attend to in a single call. Hit the limit and the API rejects the request.</li>
+  </ul>
+
+  <div class="callout info">
+    <strong>Why this framing matters.</strong> Every architectural decision in agent design is a workaround for one of those three properties. State management, deduplication, retry logic, compaction, prompt caching, multi-agent patterns, all of it exists because the underlying model is stateless, probabilistic, and bounded.
+  </div>
+
+  <h2 id="api-shape">2 · The shape of an API call</h2>
+  <p>An LLM API call is a single HTTP POST with a JSON body. You send a list of messages, you get back a response. That is the entire surface. There is no session, no memory, no state on the server side. If you want a conversation, you keep the message history yourself and resend it every time.</p>
+
+  <pre><code><span class="tok-com">// POST https://api.anthropic.com/v1/messages</span>
+{
+  <span class="tok-key">"model"</span>: <span class="tok-str">"claude-opus-4-7"</span>,
+  <span class="tok-key">"max_tokens"</span>: <span class="tok-num">1024</span>,
+  <span class="tok-key">"system"</span>: <span class="tok-str">"You are a helpful research assistant."</span>,
+  <span class="tok-key">"messages"</span>: [
+    { <span class="tok-key">"role"</span>: <span class="tok-str">"user"</span>, <span class="tok-key">"content"</span>: <span class="tok-str">"What's the weather in Paris?"</span> }
+  ]
+}</code></pre>
+
+  <p>The response comes back as a similar JSON object: a list of content blocks, a <a href="#glossary-stop-reason" class="g-link"><code>stop_reason</code></a> telling you why the model stopped, and a <code>usage</code> object with token counts. That second field is more important than people realize. It is how the <a href="#glossary-harness" class="g-link">harness</a> decides what to do next.</p>
+
+  <pre><code>{
+  <span class="tok-key">"id"</span>: <span class="tok-str">"msg_01ABC..."</span>,
+  <span class="tok-key">"type"</span>: <span class="tok-str">"message"</span>,
+  <span class="tok-key">"role"</span>: <span class="tok-str">"assistant"</span>,
+  <span class="tok-key">"content"</span>: [
+    { <span class="tok-key">"type"</span>: <span class="tok-str">"text"</span>, <span class="tok-key">"text"</span>: <span class="tok-str">"I don't have real-time weather data..."</span> }
+  ],
+  <span class="tok-key">"stop_reason"</span>: <span class="tok-str">"end_turn"</span>,
+  <span class="tok-key">"usage"</span>: { <span class="tok-key">"input_tokens"</span>: <span class="tok-num">42</span>, <span class="tok-key">"output_tokens"</span>: <span class="tok-num">28</span> }
+}</code></pre>
+
+  <h3>Request fields you will touch every day</h3>
+  <ul>
+    <li><code>model</code>: which Claude variant. Affects cost, speed, capability.</li>
+    <li><code>max_tokens</code>: hard cap on output length. Required.</li>
+    <li><code>system</code>: the system prompt. Persistent instructions for the model.</li>
+    <li><code>messages</code>: the conversation history.</li>
+    <li><code>tools</code>: tool definitions the model can invoke (covered in §5).</li>
+    <li><code>temperature</code>: randomness, 0 to 1 (covered in §4).</li>
+    <li><code>stream</code>: boolean, returns SSE instead of single response (covered in §8).</li>
+  </ul>
+
+  <h2 id="roles-blocks">3 · Roles and content blocks</h2>
+  <p>Every message has a <code>role</code>. There are exactly three real roles:</p>
+  <ul>
+    <li><strong>system</strong>: instructions from the developer. Sets behavior, persona, constraints. Lives in its own top-level field, not in the messages array.</li>
+    <li><strong>user</strong>: the human (or your program) speaking to the model. Whatever you want a response to.</li>
+    <li><strong>assistant</strong>: the model's previous turns. You include these when continuing a conversation so the model has its own history.</li>
+  </ul>
+
+  <p>And inside a message, the <code>content</code> field is either a string or an array of <strong>content blocks</strong>. The block types you will see:</p>
+  <ul>
+    <li><code>text</code>: plain text.</li>
+    <li><a href="#glossary-tool-blocks" class="g-link"><code>tool_use</code></a>: emitted by the assistant when it wants to call a tool (§5).</li>
+    <li><code>tool_result</code>: sent back by you (in a user-role message) with the tool's output.</li>
+    <li><code>image</code>: vision input.</li>
+    <li><code>thinking</code>: extended reasoning blocks (newer models).</li>
+  </ul>
+
+  <p>Five shapes. Every agent in existence is built from these in some order.</p>
+
+  <h3>Build a message stack yourself</h3>
+  <p>Click the buttons to assemble a conversation. Watch how the messages array grows. This is exactly what gets sent to <code>/v1/messages</code> on every turn. Toggle "show JSON" to see the raw payload.</p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <div class="demo-title">Demo · Message Stack Builder</div>
+      <div class="btn-row">
+        <button class="btn ghost" onclick="msgReset()">reset</button>
+        <button class="btn" id="msgJsonBtn" onclick="msgToggleJson()">show JSON</button>
+      </div>
+    </div>
+    <div class="demo-body">
+      <div class="btn-row" style="margin-bottom: 18px;">
+        <button class="btn" onclick="msgAdd('system')">+ system</button>
+        <button class="btn" onclick="msgAdd('user')">+ user</button>
+        <button class="btn" onclick="msgAdd('assistant')">+ assistant</button>
+        <button class="btn" onclick="msgAdd('tool_use')">+ tool_use</button>
+        <button class="btn" onclick="msgAdd('tool_result')">+ tool_result</button>
+      </div>
+      <div id="msgList" class="msg-list"></div>
+      <pre id="msgJson" style="display:none; margin-top: 18px;"></pre>
+    </div>
+  </div>
+
+  <h3>Sandbox · Parse content blocks</h3>
+  <p>Now write the parser. The agent loop reads <code>response.content</code> on every turn and needs to separate text blocks from tool_use blocks. Implement <code>extractToolUses</code>, which takes a response object and returns an array of objects shaped <code>{ id, name, input }</code>, one per tool_use block, in original order.</p>
+
+  <div class="sandbox-mount" data-sandbox-id="m01-extract-tool-uses"></div>
+  <script>
+  Sandbox.register('m01-extract-tool-uses', {
+    mode: 'js',
+    moduleId: 'm01',
+    prompt: 'Implement <code>extractToolUses(response)</code>. Return an array of <code>{ id, name, input }</code> for every tool_use block in <code>response.content</code>. Skip text blocks. Preserve order. Return an empty array if there are no tool_use blocks.',
+    starter:
+`function extractToolUses(response) {
+  // your code here
+}
+
+// the verifier reads this returned function
+return extractToolUses;`,
+    test(extractFn) {
+      if (typeof extractFn !== 'function') {
+        return { passed: false, message: 'Return your function. Last line should be: return extractToolUses;' };
+      }
+      const cases = [
+        {
+          name: 'all text, no tool_use',
+          input: { content: [{ type: 'text', text: 'Hello.' }] },
+          expected: []
+        },
+        {
+          name: 'one tool_use',
+          input: { content: [
+            { type: 'text', text: 'Looking up.' },
+            { type: 'tool_use', id: 'tu_1', name: 'get_weather', input: { city: 'Paris' } }
+          ]},
+          expected: [{ id: 'tu_1', name: 'get_weather', input: { city: 'Paris' } }]
+        },
+        {
+          name: 'two tool_use blocks, parallel call',
+          input: { content: [
+            { type: 'tool_use', id: 'tu_a', name: 'lookup', input: { q: 'a' } },
+            { type: 'tool_use', id: 'tu_b', name: 'lookup', input: { q: 'b' } }
+          ]},
+          expected: [
+            { id: 'tu_a', name: 'lookup', input: { q: 'a' } },
+            { id: 'tu_b', name: 'lookup', input: { q: 'b' } }
+          ]
+        },
+        {
+          name: 'mixed content with text in between',
+          input: { content: [
+            { type: 'text', text: 'I need two things.' },
+            { type: 'tool_use', id: 'tu_x', name: 'one', input: {} },
+            { type: 'text', text: 'And then:' },
+            { type: 'tool_use', id: 'tu_y', name: 'two', input: { v: 1 } }
+          ]},
+          expected: [
+            { id: 'tu_x', name: 'one', input: {} },
+            { id: 'tu_y', name: 'two', input: { v: 1 } }
+          ]
+        }
+      ];
+      for (const c of cases) {
+        let actual;
+        try { actual = extractFn(c.input); }
+        catch (e) { return { passed: false, message: 'Threw on case "' + c.name + '": ' + e.message }; }
+        if (JSON.stringify(actual) !== JSON.stringify(c.expected)) {
+          return {
+            passed: false,
+            message: 'Case "' + c.name + '" failed.',
+            details: 'expected: ' + JSON.stringify(c.expected) + '\n  actual: ' + JSON.stringify(actual)
+          };
+        }
+      }
+      return { passed: true, message: 'All four cases pass. You parsed text-only, single tool_use, parallel tool_use, and mixed content correctly.' };
+    },
+    hint: 'Filter <code>response.content</code> for blocks where <code>type === "tool_use"</code>, then map each to a new object with just the three fields. <code>Array.prototype.filter</code> + <code>.map</code> handles it cleanly.'
+  });
+  </script>
+
+  <h2 id="sampling">4 · How the model decides</h2>
+  <p>The model produces a probability distribution over the next token at every step. Sampling is the rule for picking one token from that distribution. The two parameters that matter most:</p>
+  <ul>
+    <li><a href="#glossary-temperature" class="g-link"><strong>temperature</strong></a>: scales the distribution. Low temperature (near 0) makes the highest-probability token nearly certain. High temperature (1+) flattens the distribution and produces more variety.</li>
+    <li><strong>top_p</strong>: nucleus sampling. Only consider tokens whose cumulative probability reaches <code>p</code>. Cuts off the long tail of low-probability options.</li>
+  </ul>
+
+  <p>For agent design this matters because <strong>same input does not give same output</strong>. If your harness retries a failed tool call, the model can pick a different tool the second time. If you want reproducibility for evaluation, set <code>temperature: 0</code> and pin everything else. For creative work, raise temperature. For tool selection in production, low temperature is usually right. You want the model to pick the same tool every time it sees the same situation.</p>
+
+  <div class="callout warn">
+    <strong>The trap.</strong> Even with <code>temperature: 0</code>, identical output is not guaranteed across model versions or across batches. Treat reproducibility as best-effort, not a guarantee. Eval suites should account for variance, not assume it away.
+  </div>
+
+  <h2 id="tool-use">5 · Tool use</h2>
+  <p>The model cannot run code. It cannot make HTTP requests. It cannot read files. What it <em>can</em> do is emit a structured block saying "I want to call this function with these arguments." Your code sees that block, runs the function, and sends the result back as another message. This is the only way the model touches the outside world.</p>
+
+  <p>You declare available tools when you make the API call. A tool definition looks like this. Click the highlighted keys to see what each one does:</p>
+
+  <div class="demo">
+    <div class="demo-head">
+      <div class="demo-title">Demo · Tool Definition Explorer</div>
+    </div>
+    <div class="demo-body">
+      <div class="tooldef" id="tooldef">
+{
+  <span class="tooldef-key" data-key="name">"name"</span>: <span class="tok-str">"get_weather"</span>,
+  <span class="tooldef-key" data-key="description">"description"</span>: <span class="tok-str">"Look up current weather for a city. Returns temperature in Celsius and conditions."</span>,
+  <span class="tooldef-key" data-key="input_schema">"input_schema"</span>: {
+    <span class="tok-key">"type"</span>: <span class="tok-str">"object"</span>,
+    <span class="tooldef-key" data-key="properties">"properties"</span>: {
+      <span class="tok-key">"city"</span>: { <span class="tok-key">"type"</span>: <span class="tok-str">"string"</span>, <span class="tok-key">"description"</span>: <span class="tok-str">"City name, e.g. Paris"</span> }
+    },
+    <span class="tooldef-key" data-key="required">"required"</span>: [<span class="tok-str">"city"</span>]
+  }
+}
+      </div>
+      <div class="tooldef-explain" id="tooldef-explain">
+        <span class="label">click any colored key</span>
+        Each part of a tool definition does a different job. Click a key above to see what the model uses it for.
+      </div>
+    </div>
+  </div>
+
+  <h3>The tool-use lifecycle</h3>
+  <p>When the model decides to call a tool, the response looks like this:</p>
+  <pre><code>{
+  <span class="tok-key">"content"</span>: [
+    { <span class="tok-key">"type"</span>: <span class="tok-str">"text"</span>, <span class="tok-key">"text"</span>: <span class="tok-str">"Let me check that for you."</span> },
+    {
+      <span class="tok-key">"type"</span>: <span class="tok-str">"tool_use"</span>,
+      <span class="tok-key">"id"</span>: <span class="tok-str">"tu_01XYZ..."</span>,
+      <span class="tok-key">"name"</span>: <span class="tok-str">"get_weather"</span>,
+      <span class="tok-key">"input"</span>: { <span class="tok-key">"city"</span>: <span class="tok-str">"Paris"</span> }
+    }
+  ],
+  <span class="tok-key">"stop_reason"</span>: <span class="tok-str">"tool_use"</span>
+}</code></pre>
+
+  <p>The harness inspects the response, executes <code>get_weather({ city: "Paris" })</code> in your code, and sends the result back as a <strong>user-role</strong> message containing a tool_result block:</p>
+  <pre><code>{
+  <span class="tok-key">"role"</span>: <span class="tok-str">"user"</span>,
+  <span class="tok-key">"content"</span>: [
+    {
+      <span class="tok-key">"type"</span>: <span class="tok-str">"tool_result"</span>,
+      <span class="tok-key">"tool_use_id"</span>: <span class="tok-str">"tu_01XYZ..."</span>,
+      <span class="tok-key">"content"</span>: <span class="tok-str">"18°C, partly cloudy"</span>
+    }
+  ]
+}</code></pre>
+
+  <p>The <code>tool_use_id</code> links the result back to the request. The model then continues generating, this time with the tool's output in its context.</p>
+
+  <div class="callout warn">
+    <strong>Tool descriptions are the most important strings you will write.</strong> The model picks which tool to call based almost entirely on the description. A vague description means missed or wrong tool calls. Treat descriptions as prompts, not docs.
+  </div>
+
+  <h3>Parallel tool use</h3>
+  <p>The model can emit multiple <code>tool_use</code> blocks in a single response. The harness should run them <a href="#glossary-parallel-tool-use" class="g-link">in parallel</a> where possible and return all results as content blocks in a single user-role message. This is a major performance win. Three independent enrichment calls take one round-trip instead of three.</p>
+
+  <h3>Tool errors</h3>
+  <p>If your tool throws, send the error back as a tool_result with <code>"is_error": true</code> and a string description of what failed. The model can then decide to retry, try a different tool, or surface the error to the user. Do not swallow tool errors silently. The model needs the signal.</p>
+
+  <h3>Sandbox · Build a tool definition</h3>
+  <p>Define a real tool. Build a tool definition object for <code>lookup_company</code>. It takes a single argument <code>domain</code> (string) and is described well enough that the model picks it when the user mentions a company name or asks about a company.</p>
+
+  <div class="sandbox-mount" data-sandbox-id="m01-tool-def"></div>
+  <script>
+  Sandbox.register('m01-tool-def', {
+    mode: 'js',
+    moduleId: 'm01',
+    prompt: 'Build a tool definition object for <code>lookup_company</code>. Include a clear description, an <code>input_schema</code> with a single required <code>domain</code> string property, and a per-property description.',
+    starter:
+`const tool = {
+  // your code here
+};
+
+return tool;`,
+    test(tool) {
+      if (!tool || typeof tool !== 'object') return { passed: false, message: 'Return an object.' };
+      if (tool.name !== 'lookup_company') return { passed: false, message: 'name should be exactly "lookup_company".' };
+      if (typeof tool.description !== 'string' || tool.description.length < 30) {
+        return { passed: false, message: 'description should be a clear, non-trivial string (30+ chars).' };
+      }
+      if (!tool.input_schema || tool.input_schema.type !== 'object') {
+        return { passed: false, message: 'input_schema.type should be "object".' };
+      }
+      const props = tool.input_schema.properties;
+      if (!props || !props.domain) return { passed: false, message: 'input_schema.properties.domain is missing.' };
+      if (props.domain.type !== 'string') return { passed: false, message: 'properties.domain.type should be "string".' };
+      if (typeof props.domain.description !== 'string' || props.domain.description.length < 5) {
+        return { passed: false, message: 'properties.domain needs its own description string.' };
+      }
+      const required = tool.input_schema.required;
+      if (!Array.isArray(required) || !required.includes('domain')) {
+        return { passed: false, message: 'input_schema.required should be ["domain"].' };
+      }
+      return { passed: true, message: 'Solid. Name, description, schema, required field, and a per-property description.' };
+    },
+    hint: 'The shape is <code>{ name, description, input_schema: { type, properties, required } }</code>. Both <code>description</code> at the top and <code>properties.domain.description</code> are read by the model when it decides whether and how to call your tool.'
+  });
+  </script>
+
+  <h2 id="agentic-loop">6 · The agentic loop</h2>
+  <p>One API call gets you one turn. An <em>agentic loop</em> is what happens when the model emits a tool_use, your code runs the tool, and you call the API again with the result appended. The loop runs until the model stops asking for more tools.</p>
+
+  <h3>The loop as a sequence diagram</h3>
+
+  <div class="mermaid-wrap">
+    <div class="mermaid">
+sequenceDiagram
+  autonumber
+  participant U as User
+  participant H as Harness
+  participant A as API
+  participant M as Model
+  participant T as Tool
+
+  U->>H: "What's the weather in Paris?"
+  H->>A: POST /v1/messages (messages, tools)
+  A->>M: forward request
+  M-->>A: tool_use(get_weather, city=Paris)
+  A-->>H: stop_reason=tool_use
+  H->>T: get_weather({city: "Paris"})
+  T-->>H: "18°C, partly cloudy"
+  H->>A: POST /v1/messages (with tool_result)
+  A->>M: forward request
+  M-->>A: text("It is 18°C and partly cloudy.")
+  A-->>H: stop_reason=end_turn
+  H-->>U: render text answer
+    </div>
+    <div class="mermaid-caption">Sequence: a single tool-using turn. Numbered actions match the loop simulator below.</div>
+  </div>
+
+  <h3>Step through the same loop interactively</h3>
+  <p>Each click advances one stage and shows which actor is doing the work.</p>
+
+  <div id="loop-simulator-mount"></div>
+  <script>
+  Demo.stepper(document.getElementById('loop-simulator-mount'), {
+    title: 'Agentic Loop Simulator',
+    scenario: '"What\'s the weather in Paris?"',
+    stages: [
+      { actor: 'user',    actorClass: 'user',    title: 'User asks a question', descHtml: 'A new <code>user</code> message is added to the messages array. The harness has not done anything yet.' },
+      { actor: 'harness', actorClass: 'harness', title: 'Harness sends to API', descHtml: 'Claude Code POSTs <code>{ model, messages, tools }</code> to <code>/v1/messages</code>. Tool definitions are included on every call.' },
+      { actor: 'model',   actorClass: 'model',   title: 'Model responds with tool_use', descHtml: 'The response contains a tool_use block: <code>get_weather(city: "Paris")</code>. <code>stop_reason</code> is <code>"tool_use"</code>. The harness must run the tool.' },
+      { actor: 'harness', actorClass: 'harness', title: 'Harness executes the tool', descHtml: 'The harness looks up <code>get_weather</code> in its tool registry, calls the function with the model-supplied arguments, and captures the return value: <code>"18°C, partly cloudy"</code>.' },
+      { actor: 'harness', actorClass: 'harness', title: 'Harness appends tool_result', descHtml: 'A new user-role message containing a tool_result block is pushed onto the messages array. The tool_use_id links it back to the model\'s original request.' },
+      { actor: 'harness', actorClass: 'harness', title: 'Harness sends to API again', descHtml: 'Second API call. Same tools, same model, but the messages array now has four entries instead of one.' },
+      { actor: 'model',   actorClass: 'model',   title: 'Model returns final answer', descHtml: 'Response: <code>"It\'s 18°C and partly cloudy in Paris."</code>. <code>stop_reason</code> is <code>"end_turn"</code>. The harness exits the loop and shows the answer.' }
+    ]
+  });
+  </script>
+
+  <h3>Stop reasons drive the loop</h3>
+  <p>The harness loop is driven by one field: <code>stop_reason</code>. It tells you why the model stopped generating, and dictates what to do next.</p>
+
+  <table class="compact">
+    <thead>
+      <tr><th>stop_reason</th><th>What it means</th><th>What to do</th></tr>
+    </thead>
+    <tbody>
+      <tr><td><code>end_turn</code></td><td>Model is done.</td><td>Show output, exit loop.</td></tr>
+      <tr><td><code>tool_use</code></td><td>Model wants to call tools.</td><td>Run tools, append tool_result(s), call API again.</td></tr>
+      <tr><td><code>max_tokens</code></td><td>You cut it off.</td><td>Either raise the limit or accept partial output.</td></tr>
+      <tr><td><code>stop_sequence</code></td><td>A custom stop string was hit.</td><td>Rare in agent loops. Usually a structured-output trick.</td></tr>
+      <tr><td><code>refusal</code></td><td>Model declined to comply.</td><td>Inspect the message, surface to user, do not retry blindly.</td></tr>
+    </tbody>
+  </table>
+
+  <p>Every harness in existence (Claude Code, Codex, Cursor, the Claude Agent SDK) is some version of <code>while (stop_reason === 'tool_use') { run_tools(); call_api(); }</code>. The differences between them are about <em>what they wrap around that loop</em>: file system access, permission prompts, subagents, todos, audit logs. The loop itself is five lines.</p>
+
+  <h3>Sandbox · Write the stop_reason switch</h3>
+  <p>You are writing the harness. Implement <code>decideNext(response)</code>, which returns one of four strings telling the harness what to do given a model response.</p>
+
+  <div class="sandbox-mount" data-sandbox-id="m01-decide-next"></div>
+  <script>
+  Sandbox.register('m01-decide-next', {
+    mode: 'js',
+    moduleId: 'm01',
+    prompt: 'Implement <code>decideNext(response)</code>. Return <code>"show_user"</code> on <code>end_turn</code>, <code>"run_tools"</code> on <code>tool_use</code>, <code>"cap_hit"</code> on <code>max_tokens</code>, and <code>"unknown"</code> for anything else (including <code>stop_sequence</code>, <code>refusal</code>, missing field). This is the entire control flow of an agent.',
+    starter:
+`function decideNext(response) {
+  // your code here
+}
+
+return decideNext;`,
+    test(fn) {
+      if (typeof fn !== 'function') return { passed: false, message: 'Return decideNext.' };
+      const cases = [
+        { input: { stop_reason: 'end_turn' }, want: 'show_user' },
+        { input: { stop_reason: 'tool_use' }, want: 'run_tools' },
+        { input: { stop_reason: 'max_tokens' }, want: 'cap_hit' },
+        { input: { stop_reason: 'stop_sequence' }, want: 'unknown' },
+        { input: { stop_reason: 'refusal' }, want: 'unknown' },
+        { input: {}, want: 'unknown' },
+        { input: { stop_reason: null }, want: 'unknown' }
+      ];
+      for (const c of cases) {
+        const got = fn(c.input);
+        if (got !== c.want) {
+          return {
+            passed: false,
+            message: 'Wrong return for stop_reason=' + JSON.stringify(c.input.stop_reason ?? null),
+            details: 'expected "' + c.want + '", got ' + JSON.stringify(got)
+          };
+        }
+      }
+      return { passed: true, message: 'Switch handles all five known stop reasons plus the unknown / missing case.' };
+    },
+    hint: 'A switch statement with a default of "unknown" is the cleanest shape. Or an object map: <code>const map = { end_turn: "show_user", tool_use: "run_tools", max_tokens: "cap_hit" }; return map[response.stop_reason] || "unknown";</code>'
+  });
+  </script>
+
+  <h3>What can go wrong inside the loop</h3>
+  <ul>
+    <li><strong>Infinite tool loops.</strong> The model keeps asking for the same tool with slightly different arguments. Cap iterations and break with an explicit error message.</li>
+    <li><strong>max_tokens during tool_use.</strong> The model started a tool call but hit max_tokens mid-JSON. The tool_use block is malformed. Either raise max_tokens or detect and retry.</li>
+    <li><strong>Tool selection drift.</strong> With temperature above 0, the model can pick different tools across runs for the same input. Pin temperature to 0 if you need determinism.</li>
+    <li><strong>Context exhaustion.</strong> Each loop iteration adds messages. After 20 iterations of large tool results, you can hit the context limit. Compaction or subagents address this.</li>
+  </ul>
+
+  <h2 id="context-window">7 · The context window</h2>
+  <p>The messages array has a hard limit measured in tokens. Claude Opus 4.7 with the 1M context tier holds roughly 1,000,000 tokens. The standard tier holds 200,000. Once you hit the cap the API rejects the request. That ceiling drives almost every architectural decision in agent design: when to compact, when to summarize, when to spawn a subagent, what to put in the system prompt versus the user message.</p>
+
+  <p>A practical rule: assume English averages four characters per token. A 200K-token window is roughly 800K characters, which is roughly 150,000 words, which is two and a half novels. Big, but not infinite. One badly-shaped tool that returns a 50K-token JSON blob will eat 25% of it in a single call.</p>
+
+  <div class="callout">
+    <strong>Why responses get capped.</strong> A single LinkedIn profile dump can run 8K+ tokens. Three of those and you have spent a non-trivial chunk of the agent's working memory on raw enrichment data. Truncation markers are not aesthetic. They are budget management.
+  </div>
+
+  <h3>Prompt caching, the optimization you should know exists</h3>
+  <p>If your system prompt and tool definitions do not change between calls, the API will cache that prefix and only charge full price for the new bits. Properly used, <a href="#glossary-prompt-caching" class="g-link">prompt caching</a> cuts cost by 80 to 90% on agent loops because the system prompt and tool list are sent on every iteration. You add a <code>cache_control: { type: "ephemeral" }</code> marker at the boundary of cacheable content, and the API takes care of the rest. Cache TTL is roughly 5 minutes, refreshed on each hit.</p>
+
+  <p>For an agent loop with a 10K-token system prompt and 20 iterations, prompt caching turns 200K input tokens into roughly 20K of cached read plus the new bits. Same accuracy, fraction of the cost.</p>
+
+  <h2 id="streaming">8 · Streaming</h2>
+  <p>By default, the API holds the response until the model finishes generating. With <code>stream: true</code>, the API returns <a href="#glossary-sse" class="g-link">Server-Sent Events</a> as the model produces them. The events look like:</p>
+
+  <ul>
+    <li><code>message_start</code>: fires once. Contains the message envelope minus content.</li>
+    <li><code>content_block_start</code>: a new content block is opening (text, tool_use, etc.).</li>
+    <li><code>content_block_delta</code>: incremental content for the open block. For text, a partial string. For tool_use, partial JSON.</li>
+    <li><code>content_block_stop</code>: the block is complete.</li>
+    <li><code>message_delta</code>: top-level fields update (stop_reason, usage).</li>
+    <li><code>message_stop</code>: the response is complete.</li>
+  </ul>
+
+  <p>Streaming matters for three reasons: <strong>UX</strong> (users see tokens as they arrive instead of waiting), <strong>early cancellation</strong> (you can stop generation if the user navigates away), and <strong>partial tool inputs</strong> (you can start preparing a tool call before the model finishes generating its arguments).</p>
+
+  <p>For agentic loops you usually want streaming on. Latency on a long generation can be 30+ seconds. Users will not wait 30 seconds staring at a blank screen.</p>
+
+  <h2 id="first-agent">9 · Your first 20-line agent</h2>
+  <p>Putting it all together. This is a complete, working agent. Read the comments. Every line is doing something the previous sections explained.</p>
+
+  <pre><code><span class="tok-kw">import</span> Anthropic <span class="tok-kw">from</span> <span class="tok-str">'@anthropic-ai/sdk'</span>;
+
+<span class="tok-kw">const</span> client = <span class="tok-kw">new</span> <span class="tok-fn">Anthropic</span>();   <span class="tok-com">// reads ANTHROPIC_API_KEY from env</span>
+<span class="tok-kw">const</span> messages = [{ role: <span class="tok-str">'user'</span>, content: <span class="tok-str">"What's the weather in Paris?"</span> }];
+
+<span class="tok-kw">const</span> tools = [{
+  name: <span class="tok-str">'get_weather'</span>,
+  description: <span class="tok-str">'Look up current weather for a city. Returns temp in C and conditions.'</span>,
+  input_schema: {
+    type: <span class="tok-str">'object'</span>,
+    properties: { city: { type: <span class="tok-str">'string'</span>, description: <span class="tok-str">'City name'</span> } },
+    required: [<span class="tok-str">'city'</span>]
+  }
+}];
+
+<span class="tok-kw">async function</span> <span class="tok-fn">runTool</span>(name, input) {
+  <span class="tok-kw">if</span> (name === <span class="tok-str">'get_weather'</span>) <span class="tok-kw">return</span> <span class="tok-str">`18°C, partly cloudy in ${input.city}`</span>;
+  <span class="tok-kw">throw new</span> <span class="tok-fn">Error</span>(<span class="tok-str">`unknown tool: ${name}`</span>);
+}
+
+<span class="tok-kw">while</span> (<span class="tok-kw">true</span>) {
+  <span class="tok-kw">const</span> resp = <span class="tok-kw">await</span> client.messages.<span class="tok-fn">create</span>({
+    model: <span class="tok-str">'claude-opus-4-7'</span>, max_tokens: <span class="tok-num">1024</span>, tools, messages
+  });
+  messages.<span class="tok-fn">push</span>({ role: <span class="tok-str">'assistant'</span>, content: resp.content });
+
+  <span class="tok-kw">if</span> (resp.stop_reason === <span class="tok-str">'end_turn'</span>) {
+    <span class="tok-kw">const</span> text = resp.content.<span class="tok-fn">find</span>(b =&gt; b.type === <span class="tok-str">'text'</span>)?.text;
+    <span class="tok-fn">console.log</span>(text);
+    <span class="tok-kw">break</span>;
+  }
+
+  <span class="tok-kw">const</span> toolResults = [];
+  <span class="tok-kw">for</span> (<span class="tok-kw">const</span> block <span class="tok-kw">of</span> resp.content) {
+    <span class="tok-kw">if</span> (block.type === <span class="tok-str">'tool_use'</span>) {
+      <span class="tok-kw">const</span> output = <span class="tok-kw">await</span> <span class="tok-fn">runTool</span>(block.name, block.input);
+      toolResults.<span class="tok-fn">push</span>({ type: <span class="tok-str">'tool_result'</span>, tool_use_id: block.id, content: output });
+    }
+  }
+  messages.<span class="tok-fn">push</span>({ role: <span class="tok-str">'user'</span>, content: toolResults });
+}</code></pre>
+
+  <h3>Sandbox · Make a real Claude API call</h3>
+  <p>Now do it for real. This sandbox runs in your browser against the actual Anthropic API using your own key. The first time you click run, you will be prompted for your key. It is stored only in your browser's localStorage.</p>
+  <p>Use the provided <code>claude(opts)</code> helper to ask Claude what 17 squared is. Return the assistant's text answer.</p>
+
+  <div class="sandbox-mount" data-sandbox-id="m01-real-call"></div>
+  <script>
+  Sandbox.register('m01-real-call', {
+    mode: 'anthropic',
+    moduleId: 'm01',
+    prompt: 'Use <code>claude({ messages, max_tokens })</code> to ask: <em>"What is 17 squared? Reply with just the number."</em> Return the assistant\'s text content.',
+    starter:
+`// claude({ messages, max_tokens, system?, tools?, temperature?, model? })
+// returns the parsed JSON response from /v1/messages
+
+const response = await claude({
+  messages: [
+    // your message here
+  ],
+  max_tokens: 100
+});
+
+// extract the text block from response.content
+const text = /* your code */;
+
+return text;`,
+    test(text) {
+      if (typeof text !== 'string') return { passed: false, message: 'Return the text string from the response.' };
+      if (!/289/.test(text)) {
+        return {
+          passed: false,
+          message: 'The text does not contain "289".',
+          details: 'returned: ' + text.slice(0, 200)
+        };
+      }
+      return { passed: true, message: 'Live API call succeeded and the model returned the correct answer (289). Your BYOK badge is unlocked.' };
+    },
+    hint: '<code>response.content</code> is an array of blocks. Find the one with <code>type === "text"</code> and read its <code>text</code> field. The full pattern: <code>response.content.find(b =&gt; b.type === "text").text</code>'
+  });
+  </script>
+
+  <div class="potter-angle" id="potter-angle">
+    <h3>Where Potter lives in this picture</h3>
+    <p>Potter is a real <a href="#glossary-mcp" class="g-link">MCP</a> server (the case study for this course). It is not the agent. Potter is the <em>tools</em>. When a Potter user runs a research query in Claude Code:</p>
+
+    <div class="mermaid-wrap">
+      <div class="mermaid">
+flowchart TD
+  CC["Claude Code (the harness)<br/><span style='color:#a3a3a3;font-size:11px'>runs the loop</span>"] -->|HTTPS| API["Anthropic API (the model)<br/><span style='color:#a3a3a3;font-size:11px'>decides which tool</span>"]
+  API -->|tool_use| CC
+  CC -->|MCP stdio| MCP["Potter MCP server<br/><span style='color:#a3a3a3;font-size:11px'>executes tools</span>"]
+  MCP --> P1["Proxycurl<br/>LinkedIn data"]
+  MCP --> P2["Apify<br/>posts, fallback"]
+  MCP --> P3["Firecrawl<br/>web scrape"]
+  MCP --> P4["Stagehand<br/>browser"]
+  MCP -->|tool_result| CC
+      </div>
+      <div class="mermaid-caption">Layered view: harness owns the loop, MCP owns the tools, providers do the work.</div>
+    </div>
+
+    <p>Claude Code runs the <code>while (stop_reason === 'tool_use')</code> loop. The model decides <code>potter_research_company</code> is the right call. Claude Code routes that tool_use over MCP to your server. Your server hits Proxycurl. The result comes back as a tool_result. Loop continues.</p>
+
+    <p>This is why the spec says <strong>"no LLM inside the MCP except potter_browser_act."</strong> If you put a model call inside Potter, you would have a loop running inside a loop, with two different agents fighting over context and cost. The clean separation (harness owns the loop, MCP owns the tools) is what makes Potter composable. It also lets Potter work in any MCP-speaking harness, not just Claude Code.</p>
+  </div>
+
+  <h2 id="glossary">Glossary</h2>
+  <div class="glossary">
+    <div class="glossary-item" id="glossary-token"><div class="glossary-term">token</div><div class="glossary-def">Sub-word fragment the model operates on. Roughly four characters of English per token.</div></div>
+    <div class="glossary-item" id="glossary-context-window"><div class="glossary-term">context window</div><div class="glossary-def">Maximum tokens (input + output) the model can attend to in a single call. 200K standard, 1M extended.</div></div>
+    <div class="glossary-item" id="glossary-stop-reason"><div class="glossary-term">stop_reason</div><div class="glossary-def">Field on every API response telling you why generation stopped. Drives the agentic loop's control flow.</div></div>
+    <div class="glossary-item" id="glossary-tool-blocks"><div class="glossary-term">tool_use / tool_result</div><div class="glossary-def">Content blocks. tool_use is the model asking to run a function; tool_result is your response with the output.</div></div>
+    <div class="glossary-item" id="glossary-harness"><div class="glossary-term">harness</div><div class="glossary-def">The program that runs the agentic loop, executes tools, and provides the user interface. Claude Code, Codex, Cursor, your custom script.</div></div>
+    <div class="glossary-item" id="glossary-temperature"><div class="glossary-term">temperature</div><div class="glossary-def">Sampling parameter. 0 means deterministic-ish, higher means more variety in output.</div></div>
+    <div class="glossary-item" id="glossary-sse"><div class="glossary-term">SSE</div><div class="glossary-def">Server-Sent Events. The streaming format the API uses to deliver tokens incrementally.</div></div>
+    <div class="glossary-item" id="glossary-prompt-caching"><div class="glossary-term">prompt caching</div><div class="glossary-def">Optimization that lets the API cache the prefix of repeated requests, charging much less for cached portions.</div></div>
+    <div class="glossary-item" id="glossary-mcp"><div class="glossary-term">MCP</div><div class="glossary-def">Model Context Protocol. The standard for exposing tools to LLM harnesses.</div></div>
+    <div class="glossary-item" id="glossary-parallel-tool-use"><div class="glossary-term">parallel tool use</div><div class="glossary-def">A single model response containing multiple tool_use blocks the harness should run concurrently.</div></div>
+    <div class="glossary-item" id="glossary-byok"><div class="glossary-term">BYOK</div><div class="glossary-def">"Bring your own key." A pattern where end users supply their own API credentials instead of going through a vendor's billing.</div></div>
+    <div class="glossary-item" id="glossary-stateless-api"><div class="glossary-term">stateless API</div><div class="glossary-def">An HTTP API where the server does not persist any state about clients between requests. Anthropic's /v1/messages is stateless.</div></div>
+  </div>
+
+  <h2 id="check">Check yourself</h2>
+  <p>Answer these in your own words before the next session. Click each to see how I would answer.</p>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">1. The API is described as "stateless". What does that mean in practice, and what is its consequence for how you write agent code?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">The Anthropic API does not store any conversation state between requests. Every call is independent. You send the full messages array, you get a response, the server forgets you exist. The consequence: memory is a client-side problem. If your agent needs context from earlier turns, your harness must store that conversation history somewhere (in memory, in a database, in a file) and resend it on every call.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">2. What does <code>stop_reason: "tool_use"</code> mean, and what happens next?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">The model paused generation because it wants to call one or more tools. The harness reads the tool_use block(s) from the response, executes the named tool with the provided arguments, appends a user-role message containing tool_result blocks (one per tool_use, linked by tool_use_id), and calls the API again with the updated messages array. The loop repeats until stop_reason is end_turn.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">3. Why is the description field on a tool definition load-bearing, and what is the failure mode of getting it wrong?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">The model picks which tool to call based almost entirely on the natural-language description and parameter docstrings. A vague description means the model either skips the tool when it should use it, or picks the wrong tool when two have overlapping descriptions. Tool descriptions are prompts, not docs. They are the model's only interface to your API surface.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">4. What does the harness add on top of the API that the API does not provide?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">The loop, the tool registry, the tool execution, conversation persistence, permission prompts, file system access, subagent management, audit logs, and any UI. The API gives you one model call. The harness wraps that call in the loop that makes "agent" behavior possible. Claude Code, Codex, Cursor, n8n, and a 20-line custom script are all variations of the same basic harness shape.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">5. Why does temperature matter for agent design, and what setting would you pick for tool selection in production?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">Temperature controls how random the model's token sampling is. With temperature above 0, the same input can produce different outputs across runs, including different tool selections for the same situation. For production tool selection, you usually want temperature 0 or very low. Identical inputs should pick the same tool to keep behavior predictable, debuggable, and testable. Raise temperature for creative or exploratory tasks where variety is the goal.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">6. In the Potter stack diagram, where does the agentic loop run? Why is that the right place for it?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">The loop runs in Claude Code, the harness. Putting it there keeps Potter stateless and composable. Potter ships tools, Claude Code orchestrates. If the loop lived inside Potter you would have a model deciding tools inside another model's loop, doubling cost, fragmenting context, and tying Potter to a specific LLM. The MCP boundary exists precisely to keep these layers separate, and it lets Potter work in any MCP-speaking harness.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">7. What is prompt caching and why does it matter for a long agent loop?</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">Prompt caching lets the API cache a prefix of repeated requests, typically the system prompt and tool definitions, and charge a fraction of the normal price for cached reads. For an agent loop that calls the API 20 times in a session with the same 10K-token system prompt, caching cuts that 200K of repeated input tokens to roughly 20K cached reads. Same accuracy, around 80 to 90% cost reduction. You opt in by adding a cache_control marker at the boundary of cacheable content.</div>
+  </details>
+
+  <details class="quiz-q">
+    <summary>
+      <div class="quiz-q-prompt">8. Name three things the 20-line agent skeleton lacks and where each capability comes from in production.</div>
+      <span class="quiz-q-reveal">show answer</span>
+    </summary>
+    <div class="quiz-q-answer">Examples: file system access (added by Claude Code or a custom toolset), permission prompts (added by Claude Code's UI layer), subagents (Module 02 patterns), streaming (change <code>create</code> to <code>stream</code> and consume events), caching (cache_control on system + tools), iteration cap (manual for-loop with break to prevent infinite tool loops), error handling (try/catch around tool execution, surfaced as is_error tool_results), observability (logging every call's usage and stop_reason, covered in Module 12).</div>
+  </details>
+
+  <h2 id="complete">Mark this module complete</h2>
+  <p>Once you have read everything, played with the demos, passed the sandboxes, and answered the check questions in your own words, mark Module 01 as complete to unlock progress and award your first module badge.</p>
+
+  <div class="complete-banner" id="complete-banner">
+    <div class="complete-banner-text">
+      <div class="complete-banner-title"><span id="complete-banner-prefix">Module 01 status:</span> <span id="complete-status">in progress</span></div>
+      <div class="complete-banner-desc" id="complete-desc">Click when you have finished the module.</div>
+    </div>
+    <button id="complete-btn">mark complete ✓</button>
+  </div>
+
+  <div class="module-nav">
+    <a class="module-nav-link prev" href="index.html">
+      <div class="module-nav-direction">previous</div>
+      <div class="module-nav-title">Course hub</div>
+    </a>
+    <a class="module-nav-link next" href="module-02.html">
+      <div class="module-nav-direction">next</div>
+      <div class="module-nav-title">Module 02 · Agent patterns</div>
+    </a>
+  </div>
+
+  <footer class="foot">
+    <span>module 01 / 13 · primitives</span>
+    <span><a href="index.html">course hub</a></span>
+  </footer>
+
+</main>
+
+<!-- Module loaders for the real Sandbox + Mermaid implementations.
+     progress.js, badges.js, sandbox-stub.js, demo-helpers.js are already loaded in <head>. -->
+<script src="js/sandbox.js"></script>
+<script src="js/mermaid-init.js"></script>
+
+<script>
+// ============================================================
+// Module metadata — single source of truth for cross-module refs.
+// When cloning this template to a new module, edit MODULE only.
+// Status banner prefix and next-link content derive from these
+// values at load time so authored fallbacks stay in sync.
+// ============================================================
+const MODULE = {
+  id: 'm01',
+  num: 1,
+  title: 'Primitives',
+  next: { href: 'module-02.html', title: 'Module 02 · Agent patterns' },
+  completedDesc: 'Locked in. The Primitives badge is yours and Module 02 will unlock when its content ships.'
+};
+
+// Apply derived strings to the DOM.
+(function applyModuleMeta() {
+  const numStr = String(MODULE.num).padStart(2, '0');
+  const prefix = document.getElementById('complete-banner-prefix');
+  if (prefix) prefix.textContent = 'Module ' + numStr + ' status:';
+  if (MODULE.next) {
+    const nextLink = document.querySelector('.module-nav-link.next');
+    if (nextLink) {
+      nextLink.href = MODULE.next.href;
+      const titleEl = nextLink.querySelector('.module-nav-title');
+      if (titleEl) titleEl.textContent = MODULE.next.title;
+    }
+  }
+})();
+
+// Self-check: every ToC anchor must resolve to an [id] in this file.
+// Catches drift when sections get added, renamed, or reordered.
+(function validateToc() {
+  const links = document.querySelectorAll('.toc a[href^="#"]');
+  links.forEach(a => {
+    const id = a.getAttribute('href').slice(1);
+    if (!document.getElementById(id)) {
+      console.warn('[ToC] dangling anchor: #' + id + ' (link text: "' + a.textContent + '")');
+    }
+  });
+})();
+
+// Self-check: every sandbox mount id must start with MODULE.id + '-'.
+// Catches typos when cloning this template (e.g. an m01- left in m02).
+(function validateSandboxIds() {
+  const mounts = document.querySelectorAll('[data-sandbox-id]');
+  mounts.forEach(m => {
+    const id = m.getAttribute('data-sandbox-id');
+    if (!id.startsWith(MODULE.id + '-')) {
+      console.warn('[Sandbox] mount id "' + id + '" does not start with module prefix "' + MODULE.id + '-"');
+    }
+  });
+})();
+
+// ============================================================
+// Module-level progress, complete banner, progress strip
+// ============================================================
+// Mark in-progress only when the module is not already completed.
+// Otherwise revisiting a completed module silently downgrades it.
+if (window.Progress.getModule(MODULE.id).status !== 'completed') {
+  window.Progress.markModule(MODULE.id, 'in_progress');
+}
+
+function updateStrip() {
+  const overall = window.Progress.getOverall();
+  document.getElementById('strip-fill').style.width = overall.modulePercentage + '%';
+  document.getElementById('strip-pct').textContent = overall.modulePercentage + '%';
+}
+function updateCompleteBanner() {
+  const status = window.Progress.getModule(MODULE.id).status;
+  const banner = document.getElementById('complete-banner');
+  const statusEl = document.getElementById('complete-status');
+  const descEl = document.getElementById('complete-desc');
+  const btn = document.getElementById('complete-btn');
+  if (status === 'completed') {
+    banner.classList.add('done');
+    statusEl.textContent = 'complete';
+    statusEl.style.color = 'var(--green)';
+    descEl.textContent = MODULE.completedDesc;
+    btn.textContent = 'undo';
+  } else {
+    banner.classList.remove('done');
+    statusEl.textContent = 'in progress';
+    statusEl.style.color = 'var(--accent)';
+    descEl.textContent = 'Click when you have finished the module.';
+    btn.textContent = 'mark complete ✓';
+  }
+}
+document.getElementById('complete-btn').addEventListener('click', () => {
+  const status = window.Progress.getModule(MODULE.id).status;
+  window.Progress.markModule(MODULE.id, status === 'completed' ? 'in_progress' : 'completed');
+  if (window.Badges) window.Badges.checkUnlocks();
+  updateCompleteBanner();
+  updateStrip();
+});
+window.addEventListener('aiae:progress-changed', () => { updateStrip(); updateCompleteBanner(); });
+updateStrip();
+updateCompleteBanner();
+
+// ============================================================
+// Demo: Tool Definition Explorer (click-to-explain key map)
+// ============================================================
+Demo.keyExplainer({
+  rootEl: '#tooldef',
+  targetEl: '#tooldef-explain',
+  keys: {
+    name:         { label: 'name',         text: "Internal identifier the model uses when emitting a tool_use block. Stable, programmatic, snake_case by convention. The model echoes this back in tool_use.name." },
+    description:  { label: 'description',  text: "Natural-language description of what the tool does and when to use it. The model reads this to decide whether to call the tool at all. The most load-bearing string in your whole tool definition. Vague description means missed or wrong tool calls." },
+    input_schema: { label: 'input_schema', text: "JSON Schema describing the arguments. The model uses this to construct the input object. The API also validates the model's output against the schema before sending it to your code." },
+    properties:   { label: 'properties',   text: "Each named argument with its type and description. Per-property descriptions are read by the model when filling in arguments. Same load-bearing rules as the tool description." },
+    required:     { label: 'required',     text: "Which arguments must be present. The model fills these in before calling, but the API does not strictly enforce this. Your tool implementation should still validate." }
+  }
+});
+
+// ============================================================
+// Demo: Message Stack Builder
+// (Inline because the role samples + JSON output transform are
+//  M01-specific. Generic demo machinery lives in demo-helpers.js.)
+// ============================================================
+const msgState = [];
+const msgSamples = {
+  system:      { content: "You are a helpful research assistant." },
+  user:        { content: "What's the weather in Paris?" },
+  assistant:   { content: "Sure, let me check the current conditions." },
+  tool_use:    { content: { name: "get_weather", input: { city: "Paris" }, id: "tu_01" } },
+  tool_result: { content: { tool_use_id: "tu_01", output: "18°C, partly cloudy" } }
+};
+function msgAdd(role) { msgState.push({ role, ...msgSamples[role] }); msgRender(); }
+function msgReset() {
+  msgState.length = 0;
+  document.getElementById('msgJson').style.display = 'none';
+  document.getElementById('msgJsonBtn').textContent = 'show JSON';
+  msgRender();
+}
+function msgToggleJson() {
+  const el = document.getElementById('msgJson');
+  const btn = document.getElementById('msgJsonBtn');
+  if (el.style.display === 'none') { el.style.display = 'block'; btn.textContent = 'hide JSON'; msgRenderJson(); }
+  else { el.style.display = 'none'; btn.textContent = 'show JSON'; }
+}
+function msgRender() {
+  const list = document.getElementById('msgList');
+  if (msgState.length === 0) {
+    list.innerHTML = '<div class="msg-empty">No messages yet. Click a button above to start building your conversation.</div>';
+  } else {
+    list.innerHTML = msgState.map(m => {
+      const cls = m.role.replace('_','-');
+      let body;
+      if (typeof m.content === 'string') body = '"' + m.content + '"';
+      else if (m.role === 'tool_use') body = '<em>tool_use block:</em><br>{ name: "' + m.content.name + '", input: ' + JSON.stringify(m.content.input) + ' }';
+      else if (m.role === 'tool_result') body = '<em>tool_result block:</em><br>{ tool_use_id: "' + m.content.tool_use_id + '", output: "' + m.content.output + '" }';
+      return '<div class="msg ' + cls + '"><div class="msg-role">' + m.role.replace('_',' ') + '</div><div class="msg-body">' + body + '</div></div>';
+    }).join('');
+  }
+  if (document.getElementById('msgJson').style.display === 'block') msgRenderJson();
+}
+function msgRenderJson() {
+  const sysMsg = msgState.find(m => m.role === 'system');
+  const conv = msgState.filter(m => m.role !== 'system');
+  const obj = {
+    model: 'claude-opus-4-7', max_tokens: 1024,
+    ...(sysMsg ? { system: sysMsg.content } : {}),
+    messages: conv.map(m => {
+      if (m.role === 'tool_use') return { role: 'assistant', content: [{ type: 'tool_use', id: m.content.id, name: m.content.name, input: m.content.input }] };
+      if (m.role === 'tool_result') return { role: 'user', content: [{ type: 'tool_result', tool_use_id: m.content.tool_use_id, content: m.content.output }] };
+      return { role: m.role, content: m.content };
+    })
+  };
+  document.getElementById('msgJson').textContent = JSON.stringify(obj, null, 2);
+}
+msgRender();
+</script>
+
+</body>
+</html>

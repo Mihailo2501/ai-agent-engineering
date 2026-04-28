@@ -1,0 +1,64 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Module __NUM__ · __TITLE__</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/style.css" />
+</head>
+<body>
+
+<div class="progress-strip">
+  <a href="index.html" class="progress-strip-home">← course hub</a>
+  <span class="progress-strip-label">module __NUM__ / 13</span>
+  <div class="progress-strip-bar"><div class="progress-strip-fill" id="strip-fill"></div></div>
+  <span class="progress-strip-pct" id="strip-pct">0%</span>
+</div>
+
+<main class="wrap">
+
+  <a class="back-link" href="index.html">← back to course</a>
+
+  <div class="module-hero">
+    <div class="kicker">Module __NUM__ · __TITLE__</div>
+    <h1>Coming in the next session</h1>
+    <p class="lead">__DESCRIPTION__</p>
+  </div>
+
+  <div class="callout">
+    <strong>This module is locked.</strong> Mihailo authors one module per Claude Code session. When this one ships, this page will be replaced with the full content: prose, mermaid diagrams, interactive demos, sandboxes with hidden tests, glossary, check questions, and a completion banner.
+  </div>
+
+  <h2>What this module will cover</h2>
+  <p>__OUTLINE__</p>
+
+  <div class="module-nav">
+    <a class="module-nav-link prev" href="__PREV__">
+      <div class="module-nav-direction">previous</div>
+      <div class="module-nav-title">__PREV_TITLE__</div>
+    </a>
+    <a class="module-nav-link next disabled">
+      <div class="module-nav-direction">next</div>
+      <div class="module-nav-title">__NEXT_TITLE__</div>
+    </a>
+  </div>
+
+  <footer class="foot">
+    <span>module __NUM__ / 13</span>
+    <span><a href="index.html">course hub</a></span>
+  </footer>
+
+</main>
+
+<script src="js/progress.js"></script>
+<script>
+  const o = window.Progress.getOverall();
+  document.getElementById('strip-fill').style.width = o.modulePercentage + '%';
+  document.getElementById('strip-pct').textContent = o.modulePercentage + '%';
+</script>
+
+</body>
+</html>
