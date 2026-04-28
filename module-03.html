@@ -115,7 +115,7 @@
   <p>Two practical notes. First, the XML-like tags are not magic, but Claude is trained to recognize them as section boundaries. Anthropic's prompting docs explicitly recommend tagged sections for non-trivial prompts. Plain Markdown headers also work; tags are just unambiguous in a way headers sometimes are not. Second, the order in which sections appear matters. The next section is about that.</p>
 
   <h2 id="instruction-ordering">3 · Instruction ordering</h2>
-  <p>The model attends to the whole input, but it does not attend evenly. Instructions near the top of the system prompt and at the very bottom (closest to the conversation) carry more weight than instructions buried in the middle. This is not a quirk of one model; it is a recurring finding across the literature on long-context attention.</p>
+  <p>The model attends to the whole input, but it does not attend evenly. Instructions near the top of the system prompt and at the very bottom (closest to the conversation) carry more weight than instructions buried in the middle. This is not a quirk of one model; it is a recurring finding across the literature on long-context attention, with Liu et al.'s "Lost in the Middle" (2023) the canonical reference.</p>
 
   <p>The practical heuristic for <a href="#glossary-instruction-ordering" class="g-link">instruction ordering</a>:</p>
 
@@ -147,24 +147,28 @@
 return priorities;`,
     test(obj) {
       if (!obj || typeof obj !== 'object') return { passed: false, message: 'Return an object.' };
-      const want = { role: 1, tools: 2, format: 3, refusals: 4 };
-      for (const k of Object.keys(want)) {
-        if (obj[k] !== want[k]) {
-          return {
-            passed: false,
-            message: 'Wrong priority for "' + k + '".',
-            details: 'expected ' + want[k] + ', got ' + JSON.stringify(obj[k]) + '. Order: role first, then tools, then format, then refusals.'
-          };
-        }
+      if (obj.role !== 1) {
+        return { passed: false, message: 'role should be 1 (top of prompt).', details: 'got ' + JSON.stringify(obj.role) };
       }
-      return { passed: true, message: 'Role frames the model. Tool guidance comes before format because tool selection is upstream. Refusals last so they sit closest to the conversation.' };
+      if (obj.refusals !== 4) {
+        return { passed: false, message: 'refusals should be 4 (bottom, nearest the conversation).', details: 'got ' + JSON.stringify(obj.refusals) };
+      }
+      const middle = [obj.tools, obj.format].sort();
+      if (middle[0] !== 2 || middle[1] !== 3) {
+        return {
+          passed: false,
+          message: 'tools and format should occupy positions 2 and 3 (either order).',
+          details: 'tools=' + JSON.stringify(obj.tools) + ', format=' + JSON.stringify(obj.format)
+        };
+      }
+      return { passed: true, message: 'Role frames the model first. Refusals sit closest to the conversation. Tool guidance and format both go in between.' };
     },
-    hint: 'The reasoning is not aesthetic. Role goes first because every later instruction is interpreted through the persona. Tool guidance goes second because it is read before any generation. Format third because it shapes the output. Refusals last because they sit nearest the user message and act like a final filter.'
+    hint: 'Role goes first because every later instruction is interpreted through the persona. Refusals last because they sit nearest the user message and act like a final filter. Tools and format both belong in the middle; either order is defensible. The conventional default is tools before format because tool selection is upstream of any output, but format-first is fine too.'
   });
   </script>
 
   <h2 id="react">4 · ReAct: reasoning and action interleaved</h2>
-  <p><a href="#glossary-react" class="g-link">ReAct</a> (Yao et al., 2022) is the canonical agentic prompting pattern. The model interleaves three kinds of step:</p>
+  <p><a href="#glossary-react" class="g-link">ReAct</a> (Yao et al., arXiv 2022, ICLR 2023) is the canonical agentic prompting pattern. The model interleaves three kinds of step:</p>
 
   <ul>
     <li><strong>Thought:</strong> a short reasoning trace about what to do next.</li>
@@ -213,8 +217,8 @@ flowchart LR
       { actor: 'model', actorClass: 'model', titleHtml: '<strong>Thought 1</strong>', descHtml: '"I need the capital of France first. That is Paris. Now I need its population. I should look that up rather than guess from training data."' },
       { actor: 'model', actorClass: 'model', titleHtml: '<strong>Action 1</strong>', descHtml: 'Emits <code>tool_use</code> for <code>web_search</code> with <code>{ q: "Paris population 2026" }</code>.' },
       { actor: 'harness', actorClass: 'harness', titleHtml: '<strong>Observation 1</strong>', descHtml: 'Tool returns: <em>"Paris metropolitan area population: ~11.2M (2026 estimate). City proper: ~2.1M."</em> Wrapped in a <code>tool_result</code> block on the next user message.' },
-      { actor: 'model', actorClass: 'model', titleHtml: '<strong>Thought 2</strong>', descHtml: '"The question is ambiguous: city or metro? I will answer with the metropolitan figure since that is what most people mean by population of a city, and I will note the distinction."' },
-      { actor: 'model', actorClass: 'model', titleHtml: '<strong>Final answer</strong>', descHtml: '"About 11.2 million in the metropolitan area, or 2.1 million in the city proper." <code>stop_reason</code> is <code>end_turn</code>.' }
+      { actor: 'model', actorClass: 'model', titleHtml: '<strong>Thought 2</strong>', descHtml: '"The metro figure is what people mean by &quot;population of Paris&quot; in casual usage. The user asked for one number rounded to one decimal: 11.2."' },
+      { actor: 'model', actorClass: 'model', titleHtml: '<strong>Final answer</strong>', descHtml: '"11.2 million." <code>stop_reason</code> is <code>end_turn</code>.' }
     ]
   });
   </script>
@@ -301,7 +305,7 @@ return JSON.parse(text);`,
   </ul>
 
   <h3>Few-shot inside tool descriptions</h3>
-  <p>The most underused place to put few-shot examples is inside <a href="#glossary-tool-description-as-prompt" class="g-link">tool descriptions</a>. The model reads tool descriptions to decide whether and how to call each tool. A description that says "use this for company research" is a description. A description that includes "Examples: 'tell me about acme.com' (call this) vs 'who is the CEO of Acme' (call lookup_person instead)" is a contract. Disambiguating examples in tool descriptions cut wrong-tool selections in half on real workloads.</p>
+  <p>The most underused place to put few-shot examples is inside <a href="#glossary-tool-description-as-prompt" class="g-link">tool descriptions</a>. The model reads tool descriptions to decide whether and how to call each tool. A description that says "use this for company research" is a description. A description that includes "Examples: 'tell me about acme.com' (call this) vs 'who is the CEO of Acme' (call lookup_person instead)" is a contract. Disambiguating examples like that one are one of the highest-leverage prompt edits available to you when two tools could otherwise be confused.</p>
 
   <div class="callout warn">
     <strong>The instruction-following inflation trap.</strong> Anthropic explicitly warns against language like "CRITICAL: You MUST use this tool when..." in modern Claude prompts. Recent models are responsive enough that aggressive language causes overtrigger, not undertrigger. Use normal language: "Use this tool when..." with an example or two beats screaming.
@@ -325,7 +329,7 @@ return JSON.parse(text);`,
   </table>
 
   <h3>The Opus 4.7 caveat</h3>
-  <p>Starting with Claude Opus 4.7, the API rejects non-default values for <code>temperature</code>, <code>top_p</code>, and <code>top_k</code> with a 400 error. Anthropic's recommendation: omit these parameters entirely and steer behavior through prompting. Where you previously set <code>temperature: 0.0</code> for determinism, Opus 4.7 expects you to write a prompt that produces stable output without sampling tweaks. Claude Sonnet 4.6 and Claude Haiku 4.5 still accept the full sampling parameter set; the change is specific to Opus 4.7. The deeper lesson: even on prior models, <code>temperature: 0</code> never guaranteed identical outputs across versions or batches. Treat reproducibility as best-effort.</p>
+  <p>Starting with Claude Opus 4.7, the API rejects non-default values for <code>temperature</code>, <code>top_p</code>, and <code>top_k</code> with a 400 error. Anthropic's recommendation: omit these parameters entirely and steer behavior through prompting. Where you previously set <code>temperature: 0.0</code> for determinism, Opus 4.7 expects you to write a prompt that produces stable output without sampling tweaks. Claude Sonnet 4.6 and Claude Haiku 4.5 still accept the full sampling parameter set; the change is specific to Opus 4.7. <a href="module-01.html#sampling" class="g-link">Module 01 §4</a>'s <code>temperature: 0</code> guidance still applies on those models. The deeper lesson: even on prior models, <code>temperature: 0</code> never guaranteed identical outputs across versions or batches. Treat reproducibility as best-effort.</p>
 
   <div class="callout info">
     <strong>What "deterministic" really means here.</strong> Even with temperature pinned to 0, two API calls with identical inputs can return different outputs because the underlying inference is non-deterministic across batches and across model checkpoints. Pin temperature for stability in expectation. Build evals that account for variance, not against it. Module 11 covers this in depth.
@@ -363,8 +367,8 @@ return pickTemp;`,
         }
       }
       const fb = fn({ kind: 'unknown' });
-      if (fb !== 0.5) {
-        return { passed: false, message: 'Unknown kind should return 0.5 as a sensible default.', details: 'got ' + JSON.stringify(fb) };
+      if (typeof fb !== 'number' || fb < 0.4 || fb > 0.6) {
+        return { passed: false, message: 'Unknown kind should return a moderate default in [0.4, 0.6].', details: 'got ' + JSON.stringify(fb) };
       }
       return { passed: true, message: 'You picked the right buckets. Tool selection and structured output get low temperature; creative tasks get high; default in the middle.' };
     },
@@ -415,7 +419,7 @@ return pickTemp;`,
   <div class="glossary">
     <div class="glossary-item" id="glossary-system-prompt"><div class="glossary-term">system prompt</div><div class="glossary-def">The durable instruction layer sent on every turn of the loop. Lives in the top-level <code>system</code> field, separate from the messages array.</div></div>
     <div class="glossary-item" id="glossary-persona"><div class="glossary-term">persona</div><div class="glossary-def">The role assigned in the system prompt. Frames register, vocabulary, and judgement defaults. Bad for hard rules; good for tone.</div></div>
-    <div class="glossary-item" id="glossary-react"><div class="glossary-term">ReAct</div><div class="glossary-def">Reasoning and acting interleaved. Pattern from Yao et al. (2022): Thought, Action, Observation, repeat. Modern Claude tool-use is ReAct natively.</div></div>
+    <div class="glossary-item" id="glossary-react"><div class="glossary-term">ReAct</div><div class="glossary-def">Reasoning and acting interleaved. Pattern from Yao et al. (arXiv 2022, ICLR 2023): Thought, Action, Observation, repeat. Modern Claude tool-use is ReAct natively.</div></div>
     <div class="glossary-item" id="glossary-chain-of-thought"><div class="glossary-term">chain-of-thought</div><div class="glossary-def">Reasoning trace before the answer. Without tools, prone to fabrication. With tools, becomes ReAct.</div></div>
     <div class="glossary-item" id="glossary-instruction-ordering"><div class="glossary-term">instruction ordering</div><div class="glossary-def">Where instructions sit in the prompt affects how strongly the model attends to them. Top and bottom positions carry more weight than the middle.</div></div>
     <div class="glossary-item" id="glossary-few-shot"><div class="glossary-term">few-shot</div><div class="glossary-def">Including worked examples in the prompt. Strong tool for format and edge-case control. Easy to overuse.</div></div>

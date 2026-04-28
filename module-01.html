@@ -473,7 +473,7 @@ return decideNext;`,
     <strong>Why responses get capped.</strong> A single LinkedIn profile dump can run 8K+ tokens. Three of those and you have spent a non-trivial chunk of the agent's working memory on raw enrichment data. Truncation markers are not aesthetic. They are budget management.
   </div>
 
-  <h3>Prompt caching, the optimization you should know exists</h3>
+  <h3 id="prompt-caching">Prompt caching, the optimization you should know exists</h3>
   <p>If your system prompt and tool definitions do not change between calls, the API will cache that prefix and only charge full price for the new bits. Properly used, <a href="#glossary-prompt-caching" class="g-link">prompt caching</a> cuts cost by 80 to 90% on agent loops because the system prompt and tool list are sent on every iteration. You add a <code>cache_control: { type: "ephemeral" }</code> marker at the boundary of cacheable content, and the API takes care of the rest. Cache TTL is roughly 5 minutes, refreshed on each hit.</p>
 
   <p>For an agent loop with a 10K-token system prompt and 20 iterations, prompt caching turns 200K input tokens into roughly 20K of cached read plus the new bits. Same accuracy, fraction of the cost.</p>
@@ -722,7 +722,7 @@ flowchart TD
 
 <script>
 // ============================================================
-// Module metadata — single source of truth for cross-module refs.
+// Module metadata: single source of truth for cross-module refs.
 // When cloning this template to a new module, edit MODULE only.
 // Status banner prefix and next-link content derive from these
 // values at load time so authored fallbacks stay in sync.

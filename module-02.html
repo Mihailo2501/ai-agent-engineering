@@ -53,7 +53,7 @@
   <h2 id="control-locus">1 · Workflow vs agent: where control sits</h2>
   <p>In Module 01 you wrote a single loop: <code>while (stop_reason === 'tool_use') { run_tools(); call_api(); }</code>. That loop is the seed of every multi-step LLM system. The patterns in this module are answers to one design question: <em>who decides what happens next?</em></p>
 
-  <p>Anthropic's research draws a clean line that this whole module is built around:</p>
+  <p>Anthropic's <a href="https://www.anthropic.com/engineering/building-effective-agents">Building Effective Agents</a> draws a clean line that this whole module is built around:</p>
   <ul>
     <li>A <a href="#glossary-workflow" class="g-link"><strong>workflow</strong></a> orchestrates LLMs and tools through predefined code paths. Your code holds the script. The LLM fills in slots inside that script.</li>
     <li>An <a href="#glossary-agent" class="g-link"><strong>agent</strong></a> dynamically directs its own process. The LLM holds the script. Your code provides the tools and runs the loop, but the LLM picks the next step.</li>
@@ -216,7 +216,7 @@ return route;`,
 
   <ul>
     <li><a href="#glossary-sectioning" class="g-link"><strong>Sectioning</strong></a>: split the input into chunks that can be processed independently, then combine the results. Summarizing 50 product reviews by chunking into 5 sets of 10 is a sectioning workload.</li>
-    <li><a href="#glossary-voting" class="g-link"><strong>Voting</strong></a>: run the same prompt multiple times and aggregate (majority vote, average, max, ensemble). Useful when one call's output has too much variance and you want a more stable answer.</li>
+    <li><a href="#glossary-voting" class="g-link"><strong>Voting</strong></a>: run the same prompt multiple times to get diverse outputs, then aggregate (majority vote, average, max, ensemble). Useful when single-call output has too much variance and aggregation across runs gives a more stable answer.</li>
   </ul>
 
   <h3>Parallel tool use is parallelization at the model level</h3>
@@ -243,9 +243,10 @@ flowchart TD
   W1 --> S["synthesizer LLM<br/><span style='color:#a3a3a3;font-size:11px'>combines results</span>"]
   W2 --> S
   W3 --> S
+  W1 -.->|"empty? re-plan"| O
   S --> Out["final briefing"]
     </div>
-    <div class="mermaid-caption">Orchestrator-worker. The orchestrator decides the cuts. Workers do the work. The synthesizer combines outputs.</div>
+    <div class="mermaid-caption">Orchestrator-worker. The orchestrator decides the cuts. Workers do the work. The synthesizer combines outputs. Dashed edge: optional re-plan path when a worker returns empty.</div>
   </div>
 
   <h3>Step through one orchestration</h3>
@@ -275,7 +276,7 @@ flowchart TD
 
   <h3>What goes wrong</h3>
   <ul>
-    <li><strong>Token cost compounds.</strong> Three workers plus an orchestrator plus a synthesizer is five LLM calls for one user turn. Latency adds up. <a href="module-01.html#context-window" class="g-link">Prompt caching</a> on the shared system prompt is doing real work here.</li>
+    <li><strong>Token cost compounds.</strong> Three workers plus an orchestrator plus a synthesizer is five LLM calls for one user turn. Latency adds up. <a href="module-01.html#prompt-caching" class="g-link">Prompt caching</a> on the shared system prompt is doing real work here.</li>
     <li><strong>Worker handoff drift.</strong> If the orchestrator's subtask description is vague, the worker fills in gaps creatively. Treat each subtask description as a tool description: it is the worker's only briefing.</li>
     <li><strong>Synthesis is its own job.</strong> Three good worker outputs do not combine themselves. The synthesis prompt is often where the orchestrator-worker pattern actually lives or dies.</li>
   </ul>
@@ -339,7 +340,7 @@ return orchestrate;`,
       }
       return { passed: true, message: 'Three workers ran concurrently and the result map is correct. Finished in ' + Math.round(elapsed) + 'ms.' };
     },
-    hint: '<code>Promise.all(plan.map(runWorker))</code> kicks every worker off concurrently. Then zip the results back into an object: <code>plan.reduce((acc, sub, i) =&gt; ({ ...acc, [sub.name]: results[i] }), {})</code> or a plain for-loop populating an object literal.'
+    hint: '<code>Promise.all(plan.map(runWorker))</code> kicks every worker off concurrently. <code>Promise.allSettled</code> works too as long as you extract <code>.value</code> from each settled entry. Then zip the results back into an object: <code>plan.reduce((acc, sub, i) =&gt; ({ ...acc, [sub.name]: results[i] }), {})</code> or a plain for-loop populating an object literal.'
   });
   </script>
 
@@ -406,7 +407,7 @@ return orchestrate;`,
       <tr><td>Independent subproblems, fixed shape</td><td>Parallelization (sectioning)</td><td>Orchestrator-workers when the shape varies</td></tr>
       <tr><td>Variable subproblems, plan unknown up front</td><td>Orchestrator-workers</td><td>Full agent loop when even the orchestrator's plan needs to react</td></tr>
       <tr><td>Output close to right but needs polish</td><td>Evaluator-optimizer</td><td>Stays here. This is its lane.</td></tr>
-      <tr><td>Open-ended, many turns, environment feedback</td><td>Agent loop with tools</td><td>Multi-agent only when one agent's context is the bottleneck</td></tr>
+      <tr><td>Open-ended, many turns, environment feedback</td><td>Agent loop with tools</td><td>Subagents (see §8) only when one agent's context is the bottleneck</td></tr>
     </tbody>
   </table>
 
@@ -490,7 +491,7 @@ return pick;`,
     <div class="glossary-item" id="glossary-routing"><div class="glossary-term">routing</div><div class="glossary-def">Workflow pattern: classify the input and dispatch to one of N specialized downstream paths.</div></div>
     <div class="glossary-item" id="glossary-parallelization"><div class="glossary-term">parallelization</div><div class="glossary-def">Running multiple LLM calls concurrently and combining outputs. Two flavors: sectioning (different chunks) and voting (same prompt, multiple runs).</div></div>
     <div class="glossary-item" id="glossary-sectioning"><div class="glossary-term">sectioning</div><div class="glossary-def">Parallelization variant: split the input into independent chunks, run each in parallel, combine the results.</div></div>
-    <div class="glossary-item" id="glossary-voting"><div class="glossary-term">voting</div><div class="glossary-def">Parallelization variant: run the same prompt N times and aggregate. Helps with variance, not with structural blind spots.</div></div>
+    <div class="glossary-item" id="glossary-voting"><div class="glossary-term">voting</div><div class="glossary-def">Parallelization variant: run the same prompt N times to get diverse outputs, then aggregate (majority vote, average, ensemble). The aggregation step reduces variance. Does not help with structural blind spots.</div></div>
     <div class="glossary-item" id="glossary-orchestrator-worker"><div class="glossary-term">orchestrator-worker</div><div class="glossary-def">Pattern: an orchestrator LLM plans subtasks at runtime, dispatches each to a worker LLM, and synthesizes the worker outputs.</div></div>
     <div class="glossary-item" id="glossary-evaluator-optimizer"><div class="glossary-term">evaluator-optimizer</div><div class="glossary-def">Pattern: a generator LLM produces output, an evaluator LLM critiques it, the generator revises. Loops until the evaluator passes or a cap is hit.</div></div>
     <div class="glossary-item" id="glossary-subagent"><div class="glossary-term">subagent</div><div class="glossary-def">A child agent loop launched by the parent. Has its own context window and tools, returns a single result, does not see parent context.</div></div>
