@@ -4,7 +4,13 @@
 
 A self-paced, open-source course on AI agent engineering. Built around the Claude API as the reference primitive, with Potter (Mihailo's own MCP server) as the running case study. Goal: ship a polished public repo people can clone and learn from, and a personal study tool that gets Mihailo to depth on the topics he hasn't yet mastered.
 
-**Brand:** AI Agent Engineering. **Repo:** `ai-agent-engineering` (GitHub handle TBD). **License:** MIT. **No build step** — pure HTML / CSS / vanilla JS, opens locally and deploys to GitHub Pages with zero config.
+**Brand:** AI Agent Engineering. **Repo:** `ai-agent-engineering` (GitHub handle TBD). **License:** MIT.
+
+**Distribution:** open source. Users clone the repo and run locally. **Not hosted anywhere.** No GitHub Pages, no Vercel, no Netlify. The course lives as files on disk that anyone can fork and browse offline.
+
+**Architecture today (interim):** pure HTML / CSS / vanilla JS, no build step. One HTML file per module. Optimized for AI-authoring: one file = one module = one Claude session.
+
+**Architecture after content-complete:** once all 13 modules are written and reviewed, refactor the static shell to a modern React SPA (Vite + React Router + MDX or similar). Keep all content; replace duplicated head / progress strip / footer / scripts with a shared layout. Module data unifies into a single manifest. Deploy story does not change (still local-only or self-hosted, never GitHub Pages).
 
 **Primary audience:** the user — Mihailo, GTM engineer going full-time April 1 2026, target placements at Kiln or Kiln clients. **Secondary audience:** other GTM engineers / Claude Code users / Clay graduates who want depth beyond vibe-coding.
 
@@ -21,6 +27,8 @@ These were worked through earlier — do not re-litigate without Mihailo's expli
 - Mermaid.js for technical diagrams; hand-written SVG for anything Mermaid can't do. **No image generation.** Codex is not used for diagram creation.
 - Public push to GitHub deferred until the course is content-complete. Local-only until then.
 - MIT license matching Potter convention.
+- **No hosting.** Open source repo for local clone-and-run. Don't suggest GitHub Pages, Vercel, or any other host.
+- **React SPA migration is planned after M01-M13 are content-complete**, not before. Static HTML is the interim authoring format because it is AI-authoring friendly. Do not migrate or partially refactor mid-course.
 
 ## Curriculum (13 modules)
 
