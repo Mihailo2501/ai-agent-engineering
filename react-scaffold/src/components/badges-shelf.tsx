@@ -1,19 +1,6 @@
 import { useEffect, useState } from 'react';
 import { BADGES, type Badge } from '../data/badges';
-import { getModule, getOverall, getSandbox } from '../lib/progress';
-
-function isBadgeUnlocked(badge: Badge): boolean {
-  switch (badge.unlock.kind) {
-    case 'module':
-      return getModule(badge.unlock.moduleId).status === 'completed';
-    case 'sandbox':
-      return getSandbox(badge.unlock.sandboxId).status === 'passed';
-    case 'modules-completed':
-      return getOverall().modulesCompleted >= badge.unlock.count;
-    case 'sandboxes-passed':
-      return getOverall().sandboxesPassed >= badge.unlock.count;
-  }
-}
+import { isBadgeUnlocked } from '../lib/badges';
 
 function BadgeArt({ badge, unlocked }: { badge: Badge; unlocked: boolean }) {
   const [imgFailed, setImgFailed] = useState(false);
@@ -54,7 +41,7 @@ export default function BadgesShelf() {
   }, []);
 
   return (
-    <section className="grid grid-cols-3 gap-4 md:grid-cols-4">
+    <section className="grid grid-cols-2 gap-4 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-7">
       {BADGES.map((badge) => {
         const unlocked = isBadgeUnlocked(badge);
 

@@ -1,12 +1,7 @@
-// Progress tracking via localStorage. No backend, no telemetry.
-// Single JSON blob at key `aiae:progress`.
-// Ported from js/progress.js (static version) to TypeScript and scoped
-// to 25 modules.
-
 import { MODULE_IDS, TOTAL_MODULES } from '../data/modules';
 
 const KEY = 'aiae:progress';
-const VERSION = 2; // bumped from 1 (the static version) because module count changed
+const VERSION = 3;
 
 export type ModuleStatus = 'not_started' | 'in_progress' | 'completed';
 export type SandboxStatus = 'not_started' | 'attempted' | 'passed';
@@ -28,11 +23,17 @@ interface QuizRecord {
   revealed: boolean;
 }
 
+interface SandboxStreak {
+  current: number;
+  best: number;
+}
+
 interface ProgressState {
   version: number;
   modules: Record<string, ModuleRecord>;
   sandboxes: Record<string, SandboxRecord>;
   quizzes: Record<string, QuizRecord>;
+  sandboxStreak: SandboxStreak;
   lastVisitedModule: string | null;
 }
 
@@ -42,6 +43,7 @@ function defaultState(): ProgressState {
     modules: {},
     sandboxes: {},
     quizzes: {},
+    sandboxStreak: { current: 0, best: 0 },
     lastVisitedModule: null
   };
 }
@@ -97,6 +99,20 @@ export function markSandbox(sandboxId: string, status: SandboxStatus): void {
     attempts: existing.attempts + 1,
     passedAt: status === 'passed' ? (existing.passedAt || now) : existing.passedAt
   };
+
+  if (status === 'passed') {
+    const next = state.sandboxStreak.current + 1;
+    state.sandboxStreak = {
+      current: next,
+      best: Math.max(state.sandboxStreak.best, next)
+    };
+  } else if (status === 'attempted') {
+    state.sandboxStreak = {
+      current: 0,
+      best: state.sandboxStreak.best
+    };
+  }
+
   save(state);
 }
 
@@ -110,6 +126,14 @@ export function markQuizRevealed(quizId: string): void {
   save(state);
 }
 
+export function getCurrentStreak(): number {
+  return load().sandboxStreak.current;
+}
+
+export function getBestStreak(): number {
+  return load().sandboxStreak.best;
+}
+
 export interface OverallProgress {
   modulesCompleted: number;
   modulesInProgress: number;
@@ -117,6 +141,8 @@ export interface OverallProgress {
   modulePercentage: number;
   sandboxesPassed: number;
   sandboxesAttempted: number;
+  currentStreak: number;
+  bestStreak: number;
   lastVisitedModule: string | null;
 }
 
@@ -137,6 +163,8 @@ export function getOverall(): OverallProgress {
     modulePercentage: Math.round((completed / TOTAL_MODULES) * 100),
     sandboxesPassed,
     sandboxesAttempted,
+    currentStreak: state.sandboxStreak.current,
+    bestStreak: state.sandboxStreak.best,
     lastVisitedModule: state.lastVisitedModule
   };
 }

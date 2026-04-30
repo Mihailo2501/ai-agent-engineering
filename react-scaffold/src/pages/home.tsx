@@ -1,15 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import BadgesShelf from '../components/badges-shelf';
-import { BADGES, type Badge } from '../data/badges';
+import { BADGES } from '../data/badges';
 import { MODULES, type Module } from '../data/modules';
 import { TRACKS, type TrackId } from '../data/tracks';
-import {
-  getModule,
-  getOverall,
-  getSandbox,
-  type OverallProgress
-} from '../lib/progress';
+import { isBadgeUnlocked } from '../lib/badges';
+import { getOverall, type OverallProgress } from '../lib/progress';
 
 const trackBackgrounds: Record<TrackId, string> = {
   foundations: 'bg-clay-mint',
@@ -25,19 +21,6 @@ const statTints: Record<string, string> = {
   sandboxes: 'bg-clay-sky',
   badges: 'bg-clay-cream'
 };
-
-function isBadgeUnlocked(badge: Badge): boolean {
-  switch (badge.unlock.kind) {
-    case 'module':
-      return getModule(badge.unlock.moduleId).status === 'completed';
-    case 'sandbox':
-      return getSandbox(badge.unlock.sandboxId).status === 'passed';
-    case 'modules-completed':
-      return getOverall().modulesCompleted >= badge.unlock.count;
-    case 'sandboxes-passed':
-      return getOverall().sandboxesPassed >= badge.unlock.count;
-  }
-}
 
 function ModuleArt({ module }: { module: Module }): React.JSX.Element {
   const [imgFailed, setImgFailed] = useState(false);
