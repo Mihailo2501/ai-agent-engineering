@@ -19,7 +19,7 @@ A self-paced, open-source course on AI agent engineering. Built around the Claud
 These were worked through earlier — do not re-litigate without Mihailo's explicit say-so:
 
 - 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session; build-heavy modules (especially the three GTM agent builds in Track 5) are typically one session each.
-- Design system is set via GPT image 2 mockups iterated through Codex. Once a direction is chosen, it locks across all modules. The Dark Terminal aesthetic from M01-M03 is being replaced; old design assets are exploration artifacts only.
+- **Design system: Clay-inspired (locked 2026-04-30).** Reference mockup at `~/Desktop/aiae-design-pass/aiae-home-a-clay.png`. Pastel multi-hue palette, rounded XL panels, soft drop shadows, friendly robot mascot, per-track pastel grouping. Dark Terminal aesthetic is fully retired; old M01-M03 visual styling will be replaced during the React port. Do not propose alternative aesthetic directions without explicit ask.
 - localStorage-based progress + badges. Minimum-viable gamification: progress bar, completion checkmarks, light badges. Skip XP, levels, streaks.
 - Real CodeMirror 6 sandboxes for hands-on exercises. Two execution modes:
   - In-browser JS for structural exercises (build a tool definition, parse content blocks, write a stop_reason switch)
