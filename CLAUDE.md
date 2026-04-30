@@ -8,9 +8,9 @@ A self-paced, open-source course on AI agent engineering. Built around the Claud
 
 **Distribution:** open source. Users clone the repo and run locally. **Not hosted anywhere.** No GitHub Pages, no Vercel, no Netlify. The course lives as files on disk that anyone can fork and browse offline.
 
-**Architecture today (interim):** pure HTML / CSS / vanilla JS, no build step. One HTML file per module. Optimized for AI-authoring: one file = one module = one Claude session.
+**Architecture (active build target):** React SPA (Vite + React Router + MDX or similar). Module content lives as MDX or JSX components. A shared layout owns the head, progress strip, footer, and script wiring. Module data unifies into a single manifest. Existing static modules (M01-M03) port to the new shell during the design pass. M04 onward author directly into React.
 
-**Architecture after content-complete:** once all 13 modules are written and reviewed, refactor the static shell to a modern React SPA (Vite + React Router + MDX or similar). Keep all content; replace duplicated head / progress strip / footer / scripts with a shared layout. Module data unifies into a single manifest. Deploy story does not change (still local-only or self-hosted, never GitHub Pages).
+**Distribution unchanged:** open source local-only, no hosting. The React build outputs static files that still open from disk or self-host trivially; the no-hosting decision is unaffected by the framework choice.
 
 **Primary audience:** the user — Mihailo, GTM engineer going full-time April 1 2026, target placements at Kiln or Kiln clients. **Secondary audience:** other GTM engineers / Claude Code users / Clay graduates who want depth beyond vibe-coding.
 
@@ -18,51 +18,66 @@ A self-paced, open-source course on AI agent engineering. Built around the Claud
 
 These were worked through earlier — do not re-litigate without Mihailo's explicit say-so:
 
-- 13 modules, one session per module
-- Design 3 (Dark Terminal — black bg, neon-orange accent, JetBrains Mono headings) is the locked aesthetic. Other 3 designs are exploration artifacts only.
+- 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session; build-heavy modules (especially the three GTM agent builds in Track 5) are typically one session each.
+- Design system is set via GPT image 2 mockups iterated through Codex. Once a direction is chosen, it locks across all modules. The Dark Terminal aesthetic from M01-M03 is being replaced; old design assets are exploration artifacts only.
 - localStorage-based progress + badges. Minimum-viable gamification: progress bar, completion checkmarks, light badges. Skip XP, levels, streaks.
 - Real CodeMirror 6 sandboxes for hands-on exercises. Two execution modes:
   - In-browser JS for structural exercises (build a tool definition, parse content blocks, write a stop_reason switch)
   - BYOK Anthropic API for "build a real agent loop" exercises. User's key in localStorage, sent with `anthropic-dangerous-direct-browser-access: true`
-- Mermaid.js for technical diagrams; hand-written SVG for anything Mermaid can't do. **No image generation.** Codex is not used for diagram creation.
+- Diagrams stay Mermaid + hand-written SVG. Visual chrome (badges, hero graphics, illustrative imagery) IS generated via GPT image 2 through Codex. Image generation is for design assets, not for technical diagrams.
 - Public push to GitHub deferred until the course is content-complete. Local-only until then.
 - MIT license matching Potter convention.
 - **No hosting.** Open source repo for local clone-and-run. Don't suggest GitHub Pages, Vercel, or any other host.
-- **React SPA migration is planned after M01-M13 are content-complete**, not before. Static HTML is the interim authoring format because it is AI-authoring friendly. Do not migrate or partially refactor mid-course.
 
-## Curriculum (13 modules)
+## Curriculum (25 modules, 5 tracks)
+
+The course expanded from 13 to 25 modules to give inference, multimodal, structured output, voice agents, async agents, open-source models, and applied GTM work each their own dedicated treatment.
 
 ```
-Foundations
+Track 1 — Foundations (5)
   M01  Primitives — LLM call, loop, tools, stop reasons, context, streaming
-  M02  Agent patterns — workflow vs agent, subagents, orchestrator-worker, parallel
-  M03  Prompt engineering for agents — system design, ReAct, persona, temp strategy
+  M02  Inference — forward pass, decoding, sampling at the mechanism level; providers; latency vs cost
+  M03  Agent patterns — workflow vs agent, subagents, orchestrator-worker, parallel, routing
+  M04  Prompt engineering for agents — system design, ReAct, persona, temperature strategy
+  M05  Multimodal & reasoning models — vision, image gen, audio, extended-thinking blocks, image-to-code
 
-Interfaces & harnesses
-  M04  API · SDK · CLI · MCP — the four interface shapes
-  M05  Harnesses — Claude Code, Codex, Cursor, n8n, raw SDK loop
-  M06  Claude Code extension surface — skills, plugins, hooks, slash commands, settings.json
-  M07  Managed agent platforms — Claude Agent SDK, OpenAI Agent Builder, Google Agentspace
+Track 2 — Interfaces (4)
+  M06  API · SDK · CLI · MCP — the four interface shapes, how they nest
+  M07  Harnesses — Claude Code, Codex, Cursor, n8n, raw SDK loop
+  M08  Claude Code extension surface — skills, plugins, hooks, slash commands, settings.json
+  M09  Managed agent platforms — Claude Agent SDK, OpenAI Agent Builder, Google Agentspace
 
-Tools, memory, automation
-  M08  Tool design at scale — descriptions as prompts, schemas, errors, gating, 50+ tools
-  M09  Memory and retrieval — short / long-term, RAG, vector stores, summarization
-  M10  Browser & web automation — Stagehand, primitives vs LLM-driven act, Browserbase
+Track 3 — Building (6)
+  M10  Tool design at scale — descriptions as prompts, schemas, errors, gating, 50+ tools
+  M11  Memory and retrieval — short / long-term, RAG, vector stores, summarization
+  M12  Structured output — JSON mode, schemas, when tool use beats structured output
+  M13  Browser & web automation — Stagehand, primitives vs LLM-driven act, Browserbase
+  M14  Voice & realtime agents — Realtime API, Vapi, Retell, ASR/TTS pipelines, phone agents
+  M15  Background & async agents — Inngest, Trigger.dev, cron-driven, long-running state
 
-Production
-  M11  Evaluation & testing — golden sets, LLM-as-judge, regression, red-team
-  M12  Cost, security, observability — token economics, prompt injection, audit, deployment
+Track 4 — Production (4)
+  M16  Evaluation & testing — golden sets, LLM-as-judge, regression, red-team
+  M17  Cost economics — token math, model routing, batch API, durable products on inference
+  M18  Security & adversarial — prompt injection, jailbreaks, output validation, PII
+  M19  Observability & deployment — logging, alerts, latency SLOs, agent rollouts
 
-Case study
-  M13  Potter through this lens — three runtimes, design decisions, MCP architecture
+Track 5 — Applied (6)
+  M20  Open source models & Hugging Face — HF Hub, subscription, Ollama, LM Studio, quantization
+  M21  Coding agents in depth — Claude Code internals, Codex, Cursor, Aider, SWE-bench
+  M22  GTM agent build #1 (specific agent TBD)
+  M23  GTM agent build #2 (specific agent TBD)
+  M24  GTM agent build #3 (specific agent TBD)
+  M25  Potter case study — three runtimes, design decisions, MCP architecture
 ```
+
+Old → new mapping for the existing M01-M03 content: M01 stays M01; old M02 (Agent patterns) becomes new M03; old M03 (Prompt engineering) becomes new M04. The old M12 (Cost, security, observability) splits into new M17, M18, M19. The old M13 (Potter) becomes new M25. Everything else is new authoring.
 
 ## Hard rules — apply without re-asking
 
 - **Never reference Chillrep, Chillmax, or that company in any course content, README, or page.** That conversation was the spark for the project; it is not the topic. No mention by name, no "the kind of role that pays for this", no oblique reference. The course stands on its own as a learning artifact for AI agent engineering broadly.
 - **No em dashes anywhere.** Not in body prose, not in code comments, not in titles, not in alt text. Use commas, colons, semicolons, or split sentences. Inherited from global rules; called out here because em dashes feel natural in instructional prose and need active resistance.
 - **No competitor mentions in the course content.** Same rule as Potter spec. Discuss platforms by their own names (Claude Agent SDK, OpenAI Agent Builder, Stagehand) — do not frame them as superior or inferior to anything Mihailo has built.
-- **No images, illustrations, or generated artwork.** Diagrams are Mermaid syntax or hand-written SVG. Keep it text-first.
+- **Diagrams stay text-first.** Mermaid or hand-written SVG only; no AI-generated diagrams. Visual chrome (badges, hero graphics, decorative imagery) MAY use AI-generated images via GPT image 2 through Codex. Generated images are part of the design system, not part of teaching content.
 - **Single-source content.** Every module is one HTML file at the project root. No content lives in CSS, JS, or anywhere except the page it teaches on (and shared snippets in `/js`).
 
 ## File layout
