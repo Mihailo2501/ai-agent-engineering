@@ -15,6 +15,32 @@ function isBadgeUnlocked(badge: Badge): boolean {
   }
 }
 
+function BadgeArt({ badge, unlocked }: { badge: Badge; unlocked: boolean }) {
+  const [imgFailed, setImgFailed] = useState(false);
+
+  if (imgFailed) {
+    return (
+      <div
+        className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-clay-bg text-2xl text-ink-500"
+        aria-label={`${badge.name} ${unlocked ? 'unlocked' : 'locked'}`}
+      >
+        <span aria-hidden="true">{unlocked ? '◆' : '🔒'}</span>
+      </div>
+    );
+  }
+
+  return (
+    <img
+      src={`/illustrations/badges/${badge.id}.png`}
+      alt={badge.name}
+      className={`mx-auto h-16 w-16 object-contain ${
+        unlocked ? '' : 'opacity-40 grayscale'
+      }`}
+      onError={() => setImgFailed(true)}
+    />
+  );
+}
+
 export default function BadgesShelf() {
   const [, setRefreshKey] = useState(0);
 
@@ -35,25 +61,11 @@ export default function BadgesShelf() {
         return (
           <article
             key={badge.id}
-            className="rounded-xl bg-clay-bg p-4 text-center shadow-soft"
+            className={`rounded-xl bg-clay-bg p-4 text-center shadow-soft ${
+              unlocked ? '' : 'opacity-90'
+            }`}
           >
-            {unlocked ? (
-              <img
-                src={`/illustrations/badges/${badge.id}.png`}
-                alt={badge.name}
-                className="mx-auto h-16 w-16 object-contain"
-                onError={(event) => {
-                  event.currentTarget.style.opacity = '0.3';
-                }}
-              />
-            ) : (
-              <div
-                className="mx-auto flex h-16 w-16 items-center justify-center rounded-xl bg-gray-200 text-2xl text-ink-500"
-                aria-label={`${badge.name} locked`}
-              >
-                <span aria-hidden="true">🔒</span>
-              </div>
-            )}
+            <BadgeArt badge={badge} unlocked={unlocked} />
             <p className="mt-3 font-heading text-sm text-ink-900">{badge.name}</p>
             <p className="mt-1 text-xs text-ink-500">{badge.desc}</p>
           </article>
