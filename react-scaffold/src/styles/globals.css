@@ -1,0 +1,17 @@
+@import 'tailwindcss';
+
+/*
+  Theme tokens (palette, fonts, spacing scale) will be set here once the
+  design system is locked. Tailwind 4 uses CSS-first config:
+
+  @theme {
+    --color-bg: ...;
+    --color-fg: ...;
+    --font-sans: ...;
+    --font-mono: ...;
+    ...
+  }
+
+  For now, the scaffold runs on Tailwind defaults so the routes resolve
+  and the app boots.
+*/
