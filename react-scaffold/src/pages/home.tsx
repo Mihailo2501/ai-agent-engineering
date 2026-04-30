@@ -1,9 +1,15 @@
 import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import BadgesShelf from '../components/badges-shelf';
+import { BADGES, type Badge } from '../data/badges';
 import { MODULES, type Module } from '../data/modules';
 import { TRACKS, type TrackId } from '../data/tracks';
-import { getOverall, type OverallProgress } from '../lib/progress';
+import {
+  getModule,
+  getOverall,
+  getSandbox,
+  type OverallProgress
+} from '../lib/progress';
 
 const trackBackgrounds: Record<TrackId, string> = {
   foundations: 'bg-clay-mint',
@@ -12,6 +18,19 @@ const trackBackgrounds: Record<TrackId, string> = {
   production: 'bg-clay-cream',
   applied: 'bg-clay-peach'
 };
+
+function isBadgeUnlocked(badge: Badge): boolean {
+  switch (badge.unlock.kind) {
+    case 'module':
+      return getModule(badge.unlock.moduleId).status === 'completed';
+    case 'sandbox':
+      return getSandbox(badge.unlock.sandboxId).status === 'passed';
+    case 'modules-completed':
+      return getOverall().modulesCompleted >= badge.unlock.count;
+    case 'sandboxes-passed':
+      return getOverall().sandboxesPassed >= badge.unlock.count;
+  }
+}
 
 function ModuleArt({ module }: { module: Module }): React.JSX.Element {
   const [imgFailed, setImgFailed] = useState(false);
@@ -29,6 +48,19 @@ function ModuleArt({ module }: { module: Module }): React.JSX.Element {
       src={`/illustrations/${module.id}.png`}
       alt=""
       className="h-16 w-16 object-contain"
+      onError={() => setImgFailed(true)}
+    />
+  );
+}
+
+function StatIcon({ slug }: { slug: string }): React.JSX.Element | null {
+  const [imgFailed, setImgFailed] = useState(false);
+  if (imgFailed) return null;
+  return (
+    <img
+      src={`/illustrations/stat-${slug}.png`}
+      alt=""
+      className="h-10 w-10 object-contain"
       onError={() => setImgFailed(true)}
     />
   );
@@ -63,7 +95,8 @@ function ModuleCard({ module }: { module: Module }): React.JSX.Element {
 
 export function HomePage(): React.JSX.Element {
   const [overall, setOverall] = useState<OverallProgress>(() => getOverall());
-  const [imgFailed, setImgFailed] = useState(false);
+  const [mascotFailed, setMascotFailed] = useState(false);
+  const [compositionFailed, setCompositionFailed] = useState(false);
 
   useEffect(() => {
     const updateOverall = () => setOverall(getOverall());
@@ -71,63 +104,77 @@ export function HomePage(): React.JSX.Element {
     return () => window.removeEventListener('aiae:progress-changed', updateOverall);
   }, []);
 
+  const badgesEarned = BADGES.filter(isBadgeUnlocked).length;
+
   return (
     <div className="space-y-12">
       <section className="grid grid-cols-1 gap-8 rounded-2xl bg-clay-cream p-12 shadow-medium md:grid-cols-2">
         <div>
-          <p className="mb-3 text-xs uppercase tracking-widest text-accent-coral">
-            AI Agent Engineering
-          </p>
-          <h1 className="mb-4 font-heading text-4xl text-ink-900 md:text-5xl">
-            Build real AI agents, the engineer&apos;s way.
+          <h1 className="mb-6 font-heading text-5xl leading-[1.05] text-ink-900 md:text-6xl">
+            AI Agent
+            <br />
+            <span style={{ color: '#8B70C9' }}>Engineering</span>
           </h1>
           <p className="mb-8 text-lg text-ink-700">
-            25 modules across 5 tracks. Hands-on sandboxes against the Anthropic
-            API. Open source, runs locally.
+            Go beyond vibe coding. Build real agents with the Claude API, MCP, and production tooling.
           </p>
-          <div className="flex flex-wrap gap-3">
-            <Link
-              to="/m/primitives"
-              className="rounded-full bg-accent-coral px-6 py-3 text-sm font-semibold text-white"
-            >
-              Start Module 01
-            </Link>
-            <Link
-              to="/#about"
-              className="rounded-full border border-ink-500/30 px-6 py-3 text-sm text-ink-700"
-            >
-              What is this?
-            </Link>
-          </div>
+          <Link
+            to="/m/primitives"
+            className="inline-flex rounded-full bg-accent-coral px-6 py-3 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5"
+          >
+            Start with Module 01
+          </Link>
         </div>
-        {!imgFailed ? (
-          <img
-            src="/illustrations/mascot-hero.png"
-            alt=""
-            className="mx-auto h-full max-h-80 w-full object-contain"
-            onError={() => setImgFailed(true)}
-          />
-        ) : null}
+        <div className="relative flex h-full min-h-[320px] items-center justify-center">
+          {!compositionFailed ? (
+            <img
+              src="/illustrations/hero-composition.png"
+              alt=""
+              className="absolute right-0 top-1/2 h-[80%] w-auto -translate-y-1/2 object-contain"
+              onError={() => setCompositionFailed(true)}
+            />
+          ) : null}
+          {!mascotFailed ? (
+            <img
+              src="/illustrations/mascot-hero.png"
+              alt=""
+              className="relative z-10 h-full max-h-96 w-auto object-contain"
+              onError={() => setMascotFailed(true)}
+            />
+          ) : null}
+        </div>
       </section>
 
-      <section className="grid grid-cols-1 gap-4 md:grid-cols-3">
-        <article className="rounded-xl bg-clay-bg p-6 shadow-soft">
-          <p className="font-heading text-3xl text-ink-900">
-            {overall.modulesCompleted} / {overall.totalModules}
-          </p>
-          <p className="text-xs text-ink-700">modules done</p>
+      <section className="grid grid-cols-2 gap-4 md:grid-cols-4">
+        <article className="flex items-center gap-4 rounded-xl bg-clay-bg p-5 shadow-soft">
+          <StatIcon slug="complete" />
+          <div>
+            <p className="font-heading text-2xl text-ink-900">{overall.modulePercentage}%</p>
+            <p className="text-xs text-ink-700">complete</p>
+          </div>
         </article>
-        <article className="rounded-xl bg-clay-bg p-6 shadow-soft">
-          <p className="font-heading text-3xl text-ink-900">
-            {overall.sandboxesPassed}
-          </p>
-          <p className="text-xs text-ink-700">sandboxes passed</p>
+        <article className="flex items-center gap-4 rounded-xl bg-clay-bg p-5 shadow-soft">
+          <StatIcon slug="modules" />
+          <div>
+            <p className="font-heading text-2xl text-ink-900">
+              {overall.modulesCompleted} / {overall.totalModules}
+            </p>
+            <p className="text-xs text-ink-700">modules</p>
+          </div>
         </article>
-        <article className="rounded-xl bg-clay-bg p-6 shadow-soft">
-          <p className="font-heading text-3xl text-ink-900">
-            {overall.modulePercentage}%
-          </p>
-          <p className="text-xs text-ink-700">complete</p>
+        <article className="flex items-center gap-4 rounded-xl bg-clay-bg p-5 shadow-soft">
+          <StatIcon slug="sandboxes" />
+          <div>
+            <p className="font-heading text-2xl text-ink-900">{overall.sandboxesPassed}</p>
+            <p className="text-xs text-ink-700">sandboxes passed</p>
+          </div>
+        </article>
+        <article className="flex items-center gap-4 rounded-xl bg-clay-bg p-5 shadow-soft">
+          <StatIcon slug="badges" />
+          <div>
+            <p className="font-heading text-2xl text-ink-900">{badgesEarned}</p>
+            <p className="text-xs text-ink-700">badges earned</p>
+          </div>
         </article>
       </section>
 
@@ -142,9 +189,7 @@ export function HomePage(): React.JSX.Element {
             >
               <div className="mb-6">
                 <p className="text-xs uppercase text-ink-700">Track {track.num}</p>
-                <h2 className="mt-1 font-heading text-2xl text-ink-900">
-                  {track.name}
-                </h2>
+                <h2 className="mt-1 font-heading text-2xl text-ink-900">{track.name}</h2>
                 <p className="mt-2 text-sm text-ink-700">{track.blurb}</p>
               </div>
               <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 md:grid-cols-3">
