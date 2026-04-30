@@ -166,7 +166,7 @@ flowchart LR
   Sandbox.register('m02-route', {
     mode: 'js',
     moduleId: 'm02',
-    prompt: 'Implement <code>route(input, rules)</code>. Each rule is <code>{ name, keywords: [...] }</code>. Return the first rule whose keywords appear (case-insensitive) in the input. Return <code>"fallback"</code> if none match.',
+    prompt: 'Routing is a workflow with a switch at the front: classify the input, dispatch to a specialized lane. This sandbox builds the deterministic half. Implement <code>route(input, rules)</code> where <code>input</code> is a string like <code>"I want a refund please"</code> and <code>rules</code> is an array like <code>[{ name: "refund", keywords: ["refund", "money back"] }, { name: "billing", keywords: ["invoice", "charge"] }]</code>. Return the <code>name</code> of the first rule whose keywords appear in the input (case-insensitive substring match). Return the literal string <code>"fallback"</code> when no rule matches. Order matters: <code>"refund and invoice"</code> must hit <code>"refund"</code> because that rule comes first. Match case-insensitively, so <code>"CHARGE on my card"</code> still hits the billing rule.',
     starter:
 `function route(input, rules) {
   // your code here
@@ -289,7 +289,7 @@ flowchart TD
   Sandbox.register('m02-orchestrator', {
     mode: 'js',
     moduleId: 'm02',
-    prompt: 'Implement <code>orchestrate(plan, runWorker)</code>. <code>plan</code> is an array of subtasks (e.g. <code>[{ name: "scrape", input: "..." }, ...]</code>). Run all of them concurrently with <code>runWorker(subtask)</code> and return a single object mapping each subtask\'s <code>name</code> to its result. Sequential awaits will fail the timing test.',
+    prompt: 'The orchestrator has produced the plan; you write the dispatcher that runs the workers. Concurrency is the whole point of this pattern: three independent enrichment calls should take one round-trip, not three. Implement <code>orchestrate(plan, runWorker)</code> where <code>plan</code> is shaped like <code>[{ name: "scrape", input: "acme.com" }, { name: "posts", input: "acme" }, { name: "news", input: "Acme funding" }]</code> and <code>runWorker(subtask)</code> is an async function the verifier provides. Kick off every worker concurrently and return an object mapping each subtask\'s <code>name</code> to its resolved result, like <code>{ scrape: "result-of-scrape", posts: "result-of-posts", news: "result-of-news" }</code>. The verifier times the run: three 60ms workers in parallel must finish under 140ms total. A sequential <code>await</code> loop fails the timing check even though the data shape would be correct.',
     starter:
 `async function orchestrate(plan, runWorker) {
   // your code here
@@ -424,7 +424,7 @@ return orchestrate;`,
   Sandbox.register('m02-pick-pattern', {
     mode: 'js',
     moduleId: 'm02',
-    prompt: 'Implement <code>pick(task)</code> returning the name of the right pattern. The task object has a <code>shape</code> property. The mapping is direct: see the cases in the verifier for the canonical mappings.',
+    prompt: 'Pattern choice is the architect\'s call: every step you hand to the model buys adaptability and costs predictability, so pick the smallest shape that solves the task. Implement <code>pick(task)</code> where <code>task</code> is shaped like <code>{ shape: "fixed-order-multi-step" }</code>. Return one of <code>"chaining"</code>, <code>"routing"</code>, <code>"parallel"</code>, <code>"orchestrator"</code>, <code>"evaluator"</code>, or <code>"agent"</code> based on the shape. The mappings: <code>fixed-order-multi-step</code> to <code>chaining</code>, <code>one-of-N-types</code> to <code>routing</code>, <code>independent-chunks</code> to <code>parallel</code>, <code>plan-unknown-up-front</code> to <code>orchestrator</code>, <code>almost-right-needs-polish</code> to <code>evaluator</code>, <code>open-ended-environment-feedback</code> to <code>agent</code>. For any other shape return <code>null</code> or <code>undefined</code>; do not return one of the six pattern names as a guess.',
     starter:
 `function pick(task) {
   // your code here

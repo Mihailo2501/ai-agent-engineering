@@ -282,7 +282,13 @@ ${code}
     host.querySelector('.sandbox-reset-btn').addEventListener('click', () => {
       editor.value = config.starter || '';
       outputEl.hidden = true;
+      outputBody.innerHTML = '';
       verdictEl.hidden = true;
+      verdictEl.classList.remove('pass', 'fail');
+      verdictEl.innerHTML = '';
+      hintPanel.hidden = true;
+      hintPanel.innerHTML = '';
+      sandboxEl.classList.remove('passed');
       editor.focus();
     });
     if (config.hint) {

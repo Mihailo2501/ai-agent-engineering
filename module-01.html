@@ -154,7 +154,7 @@
   Sandbox.register('m01-extract-tool-uses', {
     mode: 'js',
     moduleId: 'm01',
-    prompt: 'Implement <code>extractToolUses(response)</code>. Return an array of <code>{ id, name, input }</code> for every tool_use block in <code>response.content</code>. Skip text blocks. Preserve order. Return an empty array if there are no tool_use blocks.',
+    prompt: 'The agent loop reads <code>response.content</code> on every turn and has to separate text from tool calls before it can run anything. Implement <code>extractToolUses(response)</code> where <code>response</code> looks like <code>{ content: [{ type: "text", text: "Looking up." }, { type: "tool_use", id: "tu_1", name: "get_weather", input: { city: "Paris" } }] }</code>. Return an array of <code>{ id, name, input }</code> objects, one per tool_use block, in original order. Drop text blocks. Preserve the order tool_use blocks appeared in (this matters when the model emits parallel calls). Return <code>[]</code> when content has no tool_use blocks at all, including when content is text-only.',
     starter:
 `function extractToolUses(response) {
   // your code here
@@ -313,7 +313,7 @@ return extractToolUses;`,
   Sandbox.register('m01-tool-def', {
     mode: 'js',
     moduleId: 'm01',
-    prompt: 'Build a tool definition object for <code>lookup_company</code>. Include a clear description, an <code>input_schema</code> with a single required <code>domain</code> string property, and a per-property description.',
+    prompt: 'The model picks tools based almost entirely on the description string, so a tool definition is a prompt with a schema attached. Build a tool definition object for <code>lookup_company</code> shaped like <code>{ name, description, input_schema: { type: "object", properties: { domain: { type: "string", description: "..." } }, required: ["domain"] } }</code>. <code>name</code> must be exactly <code>"lookup_company"</code>. <code>description</code> must be at least 30 characters and explain when to call it (the verifier checks length). The <code>domain</code> property needs its own description string of at least 5 characters. <code>required</code> must include <code>"domain"</code>.',
     starter:
 `const tool = {
   // your code here
@@ -422,7 +422,7 @@ sequenceDiagram
   Sandbox.register('m01-decide-next', {
     mode: 'js',
     moduleId: 'm01',
-    prompt: 'Implement <code>decideNext(response)</code>. Return <code>"show_user"</code> on <code>end_turn</code>, <code>"run_tools"</code> on <code>tool_use</code>, <code>"cap_hit"</code> on <code>max_tokens</code>, and <code>"unknown"</code> for anything else (including <code>stop_sequence</code>, <code>refusal</code>, missing field). This is the entire control flow of an agent.',
+    prompt: 'Every harness in existence is some version of a switch on <code>stop_reason</code>: that one field decides whether to show output, run tools, or bail. Implement <code>decideNext(response)</code> where <code>response</code> is shaped like <code>{ stop_reason: "tool_use" }</code> or <code>{ stop_reason: "end_turn" }</code>. Return <code>"show_user"</code> for <code>end_turn</code>, <code>"run_tools"</code> for <code>tool_use</code>, <code>"cap_hit"</code> for <code>max_tokens</code>, and <code>"unknown"</code> for everything else. The verifier also passes <code>{ stop_reason: "stop_sequence" }</code>, <code>{ stop_reason: "refusal" }</code>, <code>{ stop_reason: null }</code>, and <code>{}</code> with no field at all; all four must return <code>"unknown"</code>.',
     starter:
 `function decideNext(response) {
   // your code here
@@ -548,7 +548,7 @@ return decideNext;`,
   Sandbox.register('m01-real-call', {
     mode: 'anthropic',
     moduleId: 'm01',
-    prompt: 'Use <code>claude({ messages, max_tokens })</code> to ask: <em>"What is 17 squared? Reply with just the number."</em> Return the assistant\'s text content.',
+    prompt: 'Time to talk to the real API from your browser. <code>claude(opts)</code> accepts <code>{ messages, max_tokens, system?, tools?, temperature?, model? }</code> and returns the parsed JSON response from <code>/v1/messages</code>, shaped like <code>{ content: [{ type: "text", text: "289" }], stop_reason: "end_turn" }</code>. Send a single user message asking <em>"What is 17 squared? Reply with just the number."</em> with <code>max_tokens: 100</code>. Pull the text out of the first <code>type: "text"</code> block in <code>response.content</code> and return it as a string. The verifier checks the returned string contains <code>"289"</code>; extra prose around the number is fine.',
     starter:
 `// claude({ messages, max_tokens, system?, tools?, temperature?, model? })
 // returns the parsed JSON response from /v1/messages

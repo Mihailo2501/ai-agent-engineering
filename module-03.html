@@ -138,7 +138,7 @@
   Sandbox.register('m03-prompt-order', {
     mode: 'js',
     moduleId: 'm03',
-    prompt: 'Return an object mapping each section name to a priority number. <code>1</code> goes at the top, <code>4</code> at the bottom. Sections: <code>"role"</code>, <code>"tools"</code>, <code>"format"</code>, <code>"refusals"</code>.',
+    prompt: 'The model attends more strongly to the top and bottom of a system prompt than to the middle, so section order changes behavior. Return an object shaped like <code>{ role: 1, tools: 2, format: 3, refusals: 4 }</code> assigning each section a priority from 1 (top) to 4 (bottom). The verifier requires <code>role: 1</code> because the persona frames every later instruction, and <code>refusals: 4</code> because hard rules sit closest to the conversation and act as a final filter. <code>tools</code> and <code>format</code> fill positions 2 and 3 in either order: both are defensible, the conventional default is tools before format because tool selection is upstream of any output.',
     starter:
 `const priorities = {
   // your code here
@@ -259,7 +259,7 @@ flowchart LR
   Sandbox.register('m03-system-steer', {
     mode: 'anthropic',
     moduleId: 'm03',
-    prompt: 'Use <code>claude({ system, messages, max_tokens })</code>. Write a <code>system</code> string that constrains the assistant to reply with a single JSON object shaped <code>{"answer": NUMBER}</code> and nothing else. Then ask "What is 17 squared?" Parse the assistant\'s text content as JSON and return the parsed object.',
+    prompt: 'A clean system prompt produces parseable output without touching sampling. This is the cleanest demonstration. Use <code>claude({ system, messages, max_tokens })</code> with a <code>system</code> string that constrains the reply to a single JSON object shaped <code>{"answer": NUMBER}</code> and nothing else: no markdown, no code fences, no prose. Send one user message: <em>"What is 17 squared?"</em> Parse the first text block of <code>response.content</code> as JSON and return the parsed object. The verifier checks the returned value is an object with <code>typeof obj.answer === "number"</code> and <code>obj.answer === 289</code>. If the model wraps the JSON in a code fence the parse fails, so make the system prompt forbid that explicitly.',
     starter:
 `const response = await claude({
   system: /* your system prompt */,
@@ -343,7 +343,7 @@ return JSON.parse(text);`,
   Sandbox.register('m03-pick-temperature', {
     mode: 'js',
     moduleId: 'm03',
-    prompt: 'Implement <code>pickTemp(task)</code>. The task object has a <code>kind</code> property. For "tool_selection", "json_extraction", "rag_qa": return a value in <code>[0, 0.3]</code>. For "brainstorm", "creative_writing", "ideation": return a value in <code>[0.7, 1.0]</code>. For anything else: return <code>0.5</code>.',
+    prompt: 'Temperature trades determinism for variety, and agent loops almost always want determinism. Implement <code>pickTemp(task)</code> where <code>task</code> is shaped like <code>{ kind: "tool_selection" }</code>. For deterministic-leaning kinds (<code>"tool_selection"</code>, <code>"json_extraction"</code>, <code>"rag_qa"</code>) return any number in <code>[0, 0.3]</code>: same input should pick the same tool, format compliance beats novelty. For variety-leaning kinds (<code>"brainstorm"</code>, <code>"creative_writing"</code>, <code>"ideation"</code>) return any number in <code>[0.7, 1.0]</code>: low temperature here produces flat, repetitive output. For anything else return a moderate default in <code>[0.4, 0.6]</code> (the verifier accepts the whole range, <code>0.5</code> is the obvious pick).',
     starter:
 `function pickTemp(task) {
   // your code here
