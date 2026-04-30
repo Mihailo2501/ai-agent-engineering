@@ -9,9 +9,9 @@ interface CalloutProps {
 }
 
 const kindClasses: Record<CalloutKind, string> = {
-  info: 'bg-clay-sky border-l-4 border-accent-coral',
-  warn: 'bg-clay-peach border-l-4 border-accent-coral',
-  note: 'bg-clay-cream border-l-4 border-ink-500'
+  info: 'bg-info-bg border border-accent-coral/30',
+  warn: 'bg-warn-bg border border-accent-coral/50',
+  note: 'bg-note-bg border border-ink-500/25'
 };
 
 export default function Callout({ kind = 'info', title, children }: CalloutProps) {

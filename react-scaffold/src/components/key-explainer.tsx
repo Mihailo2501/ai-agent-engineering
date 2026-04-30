@@ -84,10 +84,10 @@ export function KeyExplainerKey({ id, children }: KeyExplainerKeyProps) {
     <span
       role="button"
       tabIndex={0}
-      className={`cursor-help border-b border-dotted underline-offset-4 transition-colors ${
+      className={`cursor-pointer border-b border-dotted underline-offset-4 transition-colors ${
         isActive
           ? 'border-accent-coral text-accent-coral'
-          : 'border-ink-500 text-ink-900 hover:border-accent-coral hover:text-accent-coral'
+          : 'border-current/60 text-current hover:border-accent-coral hover:text-accent-coral'
       }`}
       onClick={() => setActiveId(id)}
       onFocus={() => setActiveId(id)}

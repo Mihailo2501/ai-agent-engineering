@@ -30,8 +30,19 @@ export default function CompleteBanner({
     setCompleted(true);
   }
 
+  function handleUndo() {
+    markModule(moduleId, 'in_progress');
+    setCompleted(false);
+  }
+
   return (
-    <section className="rounded-2xl bg-clay-mint p-8 shadow-medium">
+    <section
+      className={`rounded-2xl p-8 shadow-medium ${
+        completed
+          ? 'bg-success-bg border border-state-success/40'
+          : 'bg-clay-mint border border-state-success/25'
+      }`}
+    >
       {completed ? (
         <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
@@ -42,6 +53,13 @@ export default function CompleteBanner({
               Module complete
             </p>
             <p className="mt-2 text-sm text-ink-700">Progress saved locally.</p>
+            <button
+              type="button"
+              onClick={handleUndo}
+              className="mt-3 text-xs text-ink-500 underline underline-offset-2 transition-colors hover:text-accent-coral"
+            >
+              Mark incomplete
+            </button>
           </div>
           {nextSlug ? (
             <Link

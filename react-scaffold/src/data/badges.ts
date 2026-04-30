@@ -22,6 +22,6 @@ export const BADGES: Badge[] = [
   { id: 'patterns', name: 'Patterns', desc: 'Completed Module 03', icon: '◆', unlock: { kind: 'module', moduleId: 'm03' } },
   { id: 'prompt-engineer', name: 'Prompt Engineer', desc: 'Completed Module 04', icon: '◆', unlock: { kind: 'module', moduleId: 'm04' } },
   { id: 'byok', name: 'BYOK', desc: 'Made a real Anthropic API call from a sandbox', icon: '◆', unlock: { kind: 'sandbox', sandboxId: 'm01-real-call' } },
-  { id: 'sandbox-streak-3', name: 'Sandbox Streak', desc: 'Passed three sandboxes', icon: '◆', unlock: { kind: 'sandboxes-passed', count: 3 } },
+  { id: 'sandbox-streak', name: 'Sandbox Streak', desc: 'Passed three sandboxes', icon: '◆', unlock: { kind: 'sandboxes-passed', count: 3 } },
   { id: 'foundations-track', name: 'Foundations', desc: 'Finished all of Track 1', icon: '◆', unlock: { kind: 'modules-completed', count: 5 } }
 ];
