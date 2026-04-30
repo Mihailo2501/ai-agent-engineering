@@ -18,7 +18,7 @@ A self-paced, open-source course on AI agent engineering. Built around the Claud
 
 These were worked through earlier — do not re-litigate without Mihailo's explicit say-so:
 
-- 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session; build-heavy modules (especially the three GTM agent builds in Track 5) are typically one session each.
+- 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session. The three GTM agent builds in Track 5 (M22 LinkedIn outbound via HeyReach, M23 weekly funding monitor, M24 meeting prep) are one session each because they involve real working agents against Mihailo's actual stack (Potter, HeyReach, Anthropic API, calendar webhooks).
 - **Design system: Clay-inspired (locked 2026-04-30).** Reference mockup at `~/Desktop/aiae-design-pass/aiae-home-a-clay.png`. Pastel multi-hue palette, rounded XL panels, soft drop shadows, friendly robot mascot, per-track pastel grouping. Dark Terminal aesthetic is fully retired; old M01-M03 visual styling will be replaced during the React port. Do not propose alternative aesthetic directions without explicit ask.
 - localStorage-based progress + badges. Minimum-viable gamification: progress bar, completion checkmarks, light badges. Skip XP, levels, streaks.
 - Real CodeMirror 6 sandboxes for hands-on exercises. Two execution modes:
@@ -64,9 +64,9 @@ Track 4 — Production (4)
 Track 5 — Applied (6)
   M20  Open source models & Hugging Face — HF Hub, subscription, Ollama, LM Studio, quantization
   M21  Coding agents in depth — Claude Code internals, Codex, Cursor, Aider, SWE-bench
-  M22  GTM agent build #1 (specific agent TBD)
-  M23  GTM agent build #2 (specific agent TBD)
-  M24  GTM agent build #3 (specific agent TBD)
+  M22  GTM agent: LinkedIn outbound via HeyReach (research + persona-matched message + dry-run + enroll)
+  M23  GTM agent: weekly funding monitor (cron + ICP filter + Potter research + Slack digest)
+  M24  GTM agent: meeting prep (calendar webhook + per-attendee Potter research + Slack DM brief 30 min before)
   M25  Potter case study — three runtimes, design decisions, MCP architecture
 ```
 
