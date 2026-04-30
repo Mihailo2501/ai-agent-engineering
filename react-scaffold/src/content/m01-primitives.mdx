@@ -1,0 +1,557 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import Stepper from '../components/stepper';
+import KeyExplainer, { KeyExplainerKey } from '../components/key-explainer';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import MessageStackBuilder, {
+  testDecideNext,
+  testExtractToolUses,
+  testRealCall,
+  testToolDefinition
+} from './m01-message-stack';
+
+<ModuleHero
+  kicker="Module 01 · Primitives"
+  title="How an LLM call actually works"
+  lead={'Every agent, every harness, every MCP server, every "managed agent" platform sits on top of one thing: a stateless model call with messages and tools. Understand this layer and the rest is just packaging.'}
+  trackId="foundations"
+/>
+
+<Toc items={[
+  { href: '#what-is-llm', label: 'What an LLM is, in three minutes' },
+  { href: '#api-shape', label: 'The shape of an API call' },
+  { href: '#roles-blocks', label: 'Roles and content blocks' },
+  { href: '#sampling', label: 'How the model decides' },
+  { href: '#tool-use', label: 'Tool use' },
+  { href: '#agentic-loop', label: 'The agentic loop' },
+  { href: '#context-window', label: 'The context window' },
+  { href: '#streaming', label: 'Streaming' },
+  { href: '#first-agent', label: 'Your first 20-line agent' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-is-llm" num={1} title="What an LLM is, in three minutes">
+
+A large language model is a statistical machine trained to predict the next token given a sequence of previous tokens. <GLink slug="token">Tokens</GLink> are sub-word fragments. The word "Paris" is roughly one token, "Subotica" is two or three. The model has no concept of facts, no concept of time, no internal database. It has a very large set of weights that, given a sequence of tokens, produce a probability distribution over what token comes next.
+
+That is the entire mechanism. Everything else (reasoning, instruction-following, tool use, agentic behavior) is an emergent property of training that machine on enormous amounts of text and giving it a particular shape of input. The model alone is not an agent. It is a very fast next-token predictor wrapped in an HTTP API.
+
+Three properties matter for everything in this course:
+
+- <GLink slug="stateless-api"><strong>Stateless.</strong></GLink> The model has no memory of previous calls. Every API request starts from zero. Whatever the model "knows" about your conversation is whatever you put in the messages array right now.
+- **Probabilistic.** Same input does not produce identical output. The same prompt called twice can yield slightly different responses unless you pin sampling parameters carefully.
+- **Bounded.** The model has a <GLink slug="context-window">context window</GLink>: a maximum number of tokens it can attend to in a single call. Hit the limit and the API rejects the request.
+
+<Callout kind="info" title="Why this framing matters.">
+Every architectural decision in agent design is a workaround for one of those three properties. State management, deduplication, retry logic, compaction, prompt caching, multi-agent patterns, all of it exists because the underlying model is stateless, probabilistic, and bounded.
+</Callout>
+
+</Section>
+
+<Section id="api-shape" num={2} title="The shape of an API call">
+
+An LLM API call is a single HTTP POST with a JSON body. You send a list of messages, you get back a response. That is the entire surface. There is no session, no memory, no state on the server side. If you want a conversation, you keep the message history yourself and resend it every time.
+
+<CodeBlock lang="json">{`// POST https://api.anthropic.com/v1/messages
+{
+  "model": "claude-opus-4-7",
+  "max_tokens": 1024,
+  "system": "You are a helpful research assistant.",
+  "messages": [
+    { "role": "user", "content": "What's the weather in Paris?" }
+  ]
+}`}</CodeBlock>
+
+The response comes back as a similar JSON object: a list of content blocks, a <GLink slug="stop-reason"><code>stop_reason</code></GLink> telling you why the model stopped, and a `usage` object with token counts. That second field is more important than people realize. It is how the <GLink slug="harness">harness</GLink> decides what to do next.
+
+<CodeBlock lang="json">{`{
+  "id": "msg_01ABC...",
+  "type": "message",
+  "role": "assistant",
+  "content": [
+    { "type": "text", "text": "I don't have real-time weather data..." }
+  ],
+  "stop_reason": "end_turn",
+  "usage": { "input_tokens": 42, "output_tokens": 28 }
+}`}</CodeBlock>
+
+### Request fields you will touch every day
+
+- `model`: which Claude variant. Affects cost, speed, capability.
+- `max_tokens`: hard cap on output length. Required.
+- `system`: the system prompt. Persistent instructions for the model.
+- `messages`: the conversation history.
+- `tools`: tool definitions the model can invoke (covered in §5).
+- `temperature`: randomness, 0 to 1 (covered in §4).
+- `stream`: boolean, returns SSE instead of single response (covered in §8).
+
+</Section>
+
+<Section id="roles-blocks" num={3} title="Roles and content blocks">
+
+Every message has a `role`. There are exactly three real roles:
+
+- **system**: instructions from the developer. Sets behavior, persona, constraints. Lives in its own top-level field, not in the messages array.
+- **user**: the human (or your program) speaking to the model. Whatever you want a response to.
+- **assistant**: the model's previous turns. You include these when continuing a conversation so the model has its own history.
+
+And inside a message, the `content` field is either a string or an array of **content blocks**. The block types you will see:
+
+- `text`: plain text.
+- <GLink slug="tool-blocks"><code>tool_use</code></GLink>: emitted by the assistant when it wants to call a tool (§5).
+- `tool_result`: sent back by you (in a user-role message) with the tool's output.
+- `image`: vision input.
+- `thinking`: extended reasoning blocks (newer models).
+
+Five shapes. Every agent in existence is built from these in some order.
+
+### Build a message stack yourself
+
+Click the buttons to assemble a conversation. Watch how the messages array grows. This is exactly what gets sent to `/v1/messages` on every turn. Toggle "show JSON" to see the raw payload.
+
+<MessageStackBuilder />
+
+### Sandbox · Parse content blocks
+
+Now write the parser. The agent loop reads `response.content` on every turn and needs to separate text blocks from tool_use blocks. Implement `extractToolUses`, which takes a response object and returns an array of objects shaped `{ id, name, input }`, one per tool_use block, in original order.
+
+<Sandbox
+  id="m01-extract-tool-uses"
+  mode="js"
+  prompt={<>The agent loop reads <code>response.content</code> on every turn and has to separate text from tool calls before it can run anything. Implement <code>extractToolUses(response)</code> where <code>response</code> looks like <code>{'{ content: [{ type: "text", text: "Looking up." }, { type: "tool_use", id: "tu_1", name: "get_weather", input: { city: "Paris" } }] }'}</code>. Return an array of <code>{'{ id, name, input }'}</code> objects, one per tool_use block, in original order. Drop text blocks. Preserve the order tool_use blocks appeared in (this matters when the model emits parallel calls). Return <code>[]</code> when content has no tool_use blocks at all, including when content is text-only.</>}
+  starter={`function extractToolUses(response) {
+  // your code here
+}
+
+// the verifier reads this returned function
+return extractToolUses;`}
+  test={testExtractToolUses}
+  hint={<>Filter <code>response.content</code> for blocks where <code>type === "tool_use"</code>, then map each to a new object with just the three fields. <code>Array.prototype.filter</code> + <code>.map</code> handles it cleanly.</>}
+/>
+
+</Section>
+
+<Section id="sampling" num={4} title="How the model decides">
+
+The model produces a probability distribution over the next token at every step. Sampling is the rule for picking one token from that distribution. The two parameters that matter most:
+
+- <GLink slug="temperature"><strong>temperature</strong></GLink>: scales the distribution. Low temperature (near 0) makes the highest-probability token nearly certain. High temperature (1+) flattens the distribution and produces more variety.
+- **top_p**: nucleus sampling. Only consider tokens whose cumulative probability reaches `p`. Cuts off the long tail of low-probability options.
+
+For agent design this matters because **same input does not give same output**. If your harness retries a failed tool call, the model can pick a different tool the second time. If you want reproducibility for evaluation, set `temperature: 0` and pin everything else. For creative work, raise temperature. For tool selection in production, low temperature is usually right. You want the model to pick the same tool every time it sees the same situation.
+
+<Callout kind="warn" title="The trap.">
+Even with <code>temperature: 0</code>, identical output is not guaranteed across model versions or across batches. Treat reproducibility as best-effort, not a guarantee. Eval suites should account for variance, not assume it away.
+</Callout>
+
+</Section>
+
+<Section id="tool-use" num={5} title="Tool use">
+
+The model cannot run code. It cannot make HTTP requests. It cannot read files. What it *can* do is emit a structured block saying "I want to call this function with these arguments." Your code sees that block, runs the function, and sends the result back as another message. This is the only way the model touches the outside world.
+
+You declare available tools when you make the API call. A tool definition looks like this. Click the highlighted keys to see what each one does:
+
+<section className="rounded-2xl bg-clay-bg p-6 shadow-soft">
+  <p className="mb-4 font-heading text-lg text-ink-900">Demo · Tool Definition Explorer</p>
+  <KeyExplainer
+    entries={[
+      { id: 'name', label: 'name', body: 'Internal identifier the model uses when emitting a tool_use block. Stable, programmatic, snake_case by convention. The model echoes this back in tool_use.name.' },
+      { id: 'description', label: 'description', body: 'Natural-language description of what the tool does and when to use it. The model reads this to decide whether to call the tool at all. The most load-bearing string in your whole tool definition. Vague description means missed or wrong tool calls.' },
+      { id: 'input_schema', label: 'input_schema', body: "JSON Schema describing the arguments. The model uses this to construct the input object. The API also validates the model's output against the schema before sending it to your code." },
+      { id: 'properties', label: 'properties', body: 'Each named argument with its type and description. Per-property descriptions are read by the model when filling in arguments. Same load-bearing rules as the tool description.' },
+      { id: 'required', label: 'required', body: 'Which arguments must be present. The model fills these in before calling, but the API does not strictly enforce this. Your tool implementation should still validate.' }
+    ]}
+  >
+    <pre className="overflow-x-auto rounded-xl bg-[#1A2530] p-6 font-mono text-sm text-white">
+      <code>
+{`{
+  `}
+        <KeyExplainerKey id="name">"name"</KeyExplainerKey>
+{`: "get_weather",
+  `}
+        <KeyExplainerKey id="description">"description"</KeyExplainerKey>
+{`: "Look up current weather for a city. Returns temperature in Celsius and conditions.",
+  `}
+        <KeyExplainerKey id="input_schema">"input_schema"</KeyExplainerKey>
+{`: {
+    "type": "object",
+    `}
+        <KeyExplainerKey id="properties">"properties"</KeyExplainerKey>
+{`: {
+      "city": { "type": "string", "description": "City name, e.g. Paris" }
+    },
+    `}
+        <KeyExplainerKey id="required">"required"</KeyExplainerKey>
+{`: ["city"]
+  }
+}`}
+      </code>
+    </pre>
+  </KeyExplainer>
+</section>
+
+### The tool-use lifecycle
+
+When the model decides to call a tool, the response looks like this:
+
+<CodeBlock lang="json">{`{
+  "content": [
+    { "type": "text", "text": "Let me check that for you." },
+    {
+      "type": "tool_use",
+      "id": "tu_01XYZ...",
+      "name": "get_weather",
+      "input": { "city": "Paris" }
+    }
+  ],
+  "stop_reason": "tool_use"
+}`}</CodeBlock>
+
+The harness inspects the response, executes `get_weather({ city: "Paris" })` in your code, and sends the result back as a **user-role** message containing a tool_result block:
+
+<CodeBlock lang="json">{`{
+  "role": "user",
+  "content": [
+    {
+      "type": "tool_result",
+      "tool_use_id": "tu_01XYZ...",
+      "content": "18°C, partly cloudy"
+    }
+  ]
+}`}</CodeBlock>
+
+The `tool_use_id` links the result back to the request. The model then continues generating, this time with the tool's output in its context.
+
+<Callout kind="warn" title="Tool descriptions are the most important strings you will write.">
+The model picks which tool to call based almost entirely on the description. A vague description means missed or wrong tool calls. Treat descriptions as prompts, not docs.
+</Callout>
+
+### Parallel tool use
+
+The model can emit multiple `tool_use` blocks in a single response. The harness should run them <GLink slug="parallel-tool-use">in parallel</GLink> where possible and return all results as content blocks in a single user-role message. This is a major performance win. Three independent enrichment calls take one round-trip instead of three.
+
+### Tool errors
+
+If your tool throws, send the error back as a tool_result with `"is_error": true` and a string description of what failed. The model can then decide to retry, try a different tool, or surface the error to the user. Do not swallow tool errors silently. The model needs the signal.
+
+### Sandbox · Build a tool definition
+
+Define a real tool. Build a tool definition object for `lookup_company`. It takes a single argument `domain` (string) and is described well enough that the model picks it when the user mentions a company name or asks about a company.
+
+<Sandbox
+  id="m01-tool-def"
+  mode="js"
+  prompt={<>The model picks tools based almost entirely on the description string, so a tool definition is a prompt with a schema attached. Build a tool definition object for <code>lookup_company</code> shaped like <code>{'{ name, description, input_schema: { type: "object", properties: { domain: { type: "string", description: "..." } }, required: ["domain"] } }'}</code>. <code>name</code> must be exactly <code>"lookup_company"</code>. <code>description</code> must be at least 30 characters and explain when to call it (the verifier checks length). The <code>domain</code> property needs its own description string of at least 5 characters. <code>required</code> must include <code>"domain"</code>.</>}
+  starter={`const tool = {
+  // your code here
+};
+
+return tool;`}
+  test={testToolDefinition}
+  hint={<>The shape is <code>{'{ name, description, input_schema: { type, properties, required } }'}</code>. Both <code>description</code> at the top and <code>properties.domain.description</code> are read by the model when it decides whether and how to call your tool.</>}
+/>
+
+</Section>
+
+<Section id="agentic-loop" num={6} title="The agentic loop">
+
+One API call gets you one turn. An *agentic loop* is what happens when the model emits a tool_use, your code runs the tool, and you call the API again with the result appended. The loop runs until the model stops asking for more tools.
+
+### The loop as a sequence diagram
+
+<Mermaid chart={`sequenceDiagram
+  autonumber
+  participant U as User
+  participant H as Harness
+  participant A as API
+  participant M as Model
+  participant T as Tool
+
+  U->>H: "What's the weather in Paris?"
+  H->>A: POST /v1/messages (messages, tools)
+  A->>M: forward request
+  M-->>A: tool_use(get_weather, city=Paris)
+  A-->>H: stop_reason=tool_use
+  H->>T: get_weather({city: "Paris"})
+  T-->>H: "18°C, partly cloudy"
+  H->>A: POST /v1/messages (with tool_result)
+  A->>M: forward request
+  M-->>A: text("It is 18°C and partly cloudy.")
+  A-->>H: stop_reason=end_turn
+  H-->>U: render text answer`} />
+
+<p className="text-sm text-ink-500">Sequence: a single tool-using turn. Numbered actions match the loop simulator below.</p>
+
+### Step through the same loop interactively
+
+Each click advances one stage and shows which actor is doing the work.
+
+<Stepper stages={[
+  { actor: 'user', title: 'User asks a question', body: <>A new <code>user</code> message is added to the messages array. The harness has not done anything yet.</> },
+  { actor: 'harness', title: 'Harness sends to API', body: <>Claude Code POSTs <code>{'{ model, messages, tools }'}</code> to <code>/v1/messages</code>. Tool definitions are included on every call.</> },
+  { actor: 'model', title: 'Model responds with tool_use', body: <>The response contains a tool_use block: <code>get_weather(city: "Paris")</code>. <code>stop_reason</code> is <code>"tool_use"</code>. The harness must run the tool.</> },
+  { actor: 'harness', title: 'Harness executes the tool', body: <>The harness looks up <code>get_weather</code> in its tool registry, calls the function with the model-supplied arguments, and captures the return value: <code>"18°C, partly cloudy"</code>.</> },
+  { actor: 'harness', title: 'Harness appends tool_result', body: <>A new user-role message containing a tool_result block is pushed onto the messages array. The tool_use_id links it back to the model's original request.</> },
+  { actor: 'harness', title: 'Harness sends to API again', body: <>Second API call. Same tools, same model, but the messages array now has four entries instead of one.</> },
+  { actor: 'model', title: 'Model returns final answer', body: <>Response: <code>"It's 18°C and partly cloudy in Paris."</code>. <code>stop_reason</code> is <code>"end_turn"</code>. The harness exits the loop and shows the answer.</> }
+]} />
+
+### Stop reasons drive the loop
+
+The harness loop is driven by one field: `stop_reason`. It tells you why the model stopped generating, and dictates what to do next.
+
+<table className="w-full border-collapse overflow-hidden rounded-xl bg-clay-bg text-sm shadow-soft">
+  <thead>
+    <tr><th className="border border-ink-500/20 p-3 text-left">stop_reason</th><th className="border border-ink-500/20 p-3 text-left">What it means</th><th className="border border-ink-500/20 p-3 text-left">What to do</th></tr>
+  </thead>
+  <tbody>
+    <tr><td className="border border-ink-500/20 p-3"><code>end_turn</code></td><td className="border border-ink-500/20 p-3">Model is done.</td><td className="border border-ink-500/20 p-3">Show output, exit loop.</td></tr>
+    <tr><td className="border border-ink-500/20 p-3"><code>tool_use</code></td><td className="border border-ink-500/20 p-3">Model wants to call tools.</td><td className="border border-ink-500/20 p-3">Run tools, append tool_result(s), call API again.</td></tr>
+    <tr><td className="border border-ink-500/20 p-3"><code>max_tokens</code></td><td className="border border-ink-500/20 p-3">You cut it off.</td><td className="border border-ink-500/20 p-3">Either raise the limit or accept partial output.</td></tr>
+    <tr><td className="border border-ink-500/20 p-3"><code>stop_sequence</code></td><td className="border border-ink-500/20 p-3">A custom stop string was hit.</td><td className="border border-ink-500/20 p-3">Rare in agent loops. Usually a structured-output trick.</td></tr>
+    <tr><td className="border border-ink-500/20 p-3"><code>refusal</code></td><td className="border border-ink-500/20 p-3">Model declined to comply.</td><td className="border border-ink-500/20 p-3">Inspect the message, surface to user, do not retry blindly.</td></tr>
+  </tbody>
+</table>
+
+Every harness in existence (Claude Code, Codex, Cursor, the Claude Agent SDK) is some version of `while (stop_reason === 'tool_use') { run_tools(); call_api(); }`. The differences between them are about *what they wrap around that loop*: file system access, permission prompts, subagents, todos, audit logs. The loop itself is five lines.
+
+### Sandbox · Write the stop_reason switch
+
+You are writing the harness. Implement `decideNext(response)`, which returns one of four strings telling the harness what to do given a model response.
+
+<Sandbox
+  id="m01-decide-next"
+  mode="js"
+  prompt={<>Every harness in existence is some version of a switch on <code>stop_reason</code>: that one field decides whether to show output, run tools, or bail. Implement <code>decideNext(response)</code> where <code>response</code> is shaped like <code>{'{ stop_reason: "tool_use" }'}</code> or <code>{'{ stop_reason: "end_turn" }'}</code>. Return <code>"show_user"</code> for <code>end_turn</code>, <code>"run_tools"</code> for <code>tool_use</code>, <code>"cap_hit"</code> for <code>max_tokens</code>, and <code>"unknown"</code> for everything else. The verifier also passes <code>{'{ stop_reason: "stop_sequence" }'}</code>, <code>{'{ stop_reason: "refusal" }'}</code>, <code>{'{ stop_reason: null }'}</code>, and <code>{'{}'}</code> with no field at all; all four must return <code>"unknown"</code>.</>}
+  starter={`function decideNext(response) {
+  // your code here
+}
+
+return decideNext;`}
+  test={testDecideNext}
+  hint={<>A switch statement with a default of "unknown" is the cleanest shape. Or an object map: <code>{'const map = { end_turn: "show_user", tool_use: "run_tools", max_tokens: "cap_hit" }; return map[response.stop_reason] || "unknown";'}</code></>}
+/>
+
+### What can go wrong inside the loop
+
+- **Infinite tool loops.** The model keeps asking for the same tool with slightly different arguments. Cap iterations and break with an explicit error message.
+- **max_tokens during tool_use.** The model started a tool call but hit max_tokens mid-JSON. The tool_use block is malformed. Either raise max_tokens or detect and retry.
+- **Tool selection drift.** With temperature above 0, the model can pick different tools across runs for the same input. Pin temperature to 0 if you need determinism.
+- **Context exhaustion.** Each loop iteration adds messages. After 20 iterations of large tool results, you can hit the context limit. Compaction or subagents address this.
+
+</Section>
+
+<Section id="context-window" num={7} title="The context window">
+
+The messages array has a hard limit measured in tokens. Claude Opus 4.7 with the 1M context tier holds roughly 1,000,000 tokens. The standard tier holds 200,000. Once you hit the cap the API rejects the request. That ceiling drives almost every architectural decision in agent design: when to compact, when to summarize, when to spawn a subagent, what to put in the system prompt versus the user message.
+
+A practical rule: assume English averages four characters per token. A 200K-token window is roughly 800K characters, which is roughly 150,000 words, which is two and a half novels. Big, but not infinite. One badly-shaped tool that returns a 50K-token JSON blob will eat 25% of it in a single call.
+
+<Callout kind="note" title="Why responses get capped.">
+A single LinkedIn profile dump can run 8K+ tokens. Three of those and you have spent a non-trivial chunk of the agent's working memory on raw enrichment data. Truncation markers are not aesthetic. They are budget management.
+</Callout>
+
+### Prompt caching, the optimization you should know exists
+
+If your system prompt and tool definitions do not change between calls, the API will cache that prefix and only charge full price for the new bits. Properly used, <GLink slug="prompt-caching">prompt caching</GLink> cuts cost by 80 to 90% on agent loops because the system prompt and tool list are sent on every iteration. You add a `cache_control: { type: "ephemeral" }` marker at the boundary of cacheable content, and the API takes care of the rest. Cache TTL is roughly 5 minutes, refreshed on each hit.
+
+For an agent loop with a 10K-token system prompt and 20 iterations, prompt caching turns 200K input tokens into roughly 20K of cached read plus the new bits. Same accuracy, fraction of the cost.
+
+</Section>
+
+<Section id="streaming" num={8} title="Streaming">
+
+By default, the API holds the response until the model finishes generating. With `stream: true`, the API returns <GLink slug="sse">Server-Sent Events</GLink> as the model produces them. The events look like:
+
+- `message_start`: fires once. Contains the message envelope minus content.
+- `content_block_start`: a new content block is opening (text, tool_use, etc.).
+- `content_block_delta`: incremental content for the open block. For text, a partial string. For tool_use, partial JSON.
+- `content_block_stop`: the block is complete.
+- `message_delta`: top-level fields update (stop_reason, usage).
+- `message_stop`: the response is complete.
+
+Streaming matters for three reasons: **UX** (users see tokens as they arrive instead of waiting), **early cancellation** (you can stop generation if the user navigates away), and **partial tool inputs** (you can start preparing a tool call before the model finishes generating its arguments).
+
+For agentic loops you usually want streaming on. Latency on a long generation can be 30+ seconds. Users will not wait 30 seconds staring at a blank screen.
+
+</Section>
+
+<Section id="first-agent" num={9} title="Your first 20-line agent">
+
+Putting it all together. This is a complete, working agent. Read the comments. Every line is doing something the previous sections explained.
+
+<CodeBlock lang="ts">{`import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic();   // reads ANTHROPIC_API_KEY from env
+const messages = [{ role: 'user', content: "What's the weather in Paris?" }];
+
+const tools = [{
+  name: 'get_weather',
+  description: 'Look up current weather for a city. Returns temp in C and conditions.',
+  input_schema: {
+    type: 'object',
+    properties: { city: { type: 'string', description: 'City name' } },
+    required: ['city']
+  }
+}];
+
+async function runTool(name, input) {
+  if (name === 'get_weather') return \`18°C, partly cloudy in \${input.city}\`;
+  throw new Error(\`unknown tool: \${name}\`);
+}
+
+while (true) {
+  const resp = await client.messages.create({
+    model: 'claude-opus-4-7', max_tokens: 1024, tools, messages
+  });
+  messages.push({ role: 'assistant', content: resp.content });
+
+  if (resp.stop_reason === 'end_turn') {
+    const text = resp.content.find(b => b.type === 'text')?.text;
+    console.log(text);
+    break;
+  }
+
+  const toolResults = [];
+  for (const block of resp.content) {
+    if (block.type === 'tool_use') {
+      const output = await runTool(block.name, block.input);
+      toolResults.push({ type: 'tool_result', tool_use_id: block.id, content: output });
+    }
+  }
+  messages.push({ role: 'user', content: toolResults });
+}`}</CodeBlock>
+
+### Sandbox · Make a real Claude API call
+
+Now do it for real. This sandbox runs in your browser against the actual Anthropic API using your own key. The first time you click run, you will be prompted for your key. It is stored only in your browser's localStorage.
+
+Use the provided `claude(opts)` helper to ask Claude what 17 squared is. Return the assistant's text answer.
+
+<Sandbox
+  id="m01-real-call"
+  mode="anthropic"
+  prompt={<>Time to talk to the real API from your browser. <code>claude(opts)</code> accepts <code>{'{ messages, max_tokens, system?, tools?, temperature?, model? }'}</code> and returns the parsed JSON response from <code>/v1/messages</code>, shaped like <code>{'{ content: [{ type: "text", text: "289" }], stop_reason: "end_turn" }'}</code>. Send a single user message asking <em>"What is 17 squared? Reply with just the number."</em> with <code>max_tokens: 100</code>. Pull the text out of the first <code>type: "text"</code> block in <code>response.content</code> and return it as a string. The verifier checks the returned string contains <code>"289"</code>; extra prose around the number is fine.</>}
+  starter={`// claude({ messages, max_tokens, system?, tools?, temperature?, model? })
+// returns the parsed JSON response from /v1/messages
+
+const response = await claude({
+  messages: [
+    // your message here
+  ],
+  max_tokens: 100
+});
+
+// extract the text block from response.content
+const text = /* your code */;
+
+return text;`}
+  test={testRealCall}
+  hint={<> <code>response.content</code> is an array of blocks. Find the one with <code>type === "text"</code> and read its <code>text</code> field. The full pattern: <code>{'response.content.find(b => b.type === "text").text'}</code></>}
+/>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Where Potter lives in this picture</h3>
+
+    <p>Potter is a real <GLink slug="mcp">MCP</GLink> server (the case study for this course). It is not the agent. Potter is the <em>tools</em>. When a Potter user runs a research query in Claude Code:</p>
+
+    <Mermaid chart={`flowchart TD
+  CC["Claude Code (the harness)<br/><span style='color:#a3a3a3;font-size:11px'>runs the loop</span>"] -->|HTTPS| API["Anthropic API (the model)<br/><span style='color:#a3a3a3;font-size:11px'>decides which tool</span>"]
+  API -->|tool_use| CC
+  CC -->|MCP stdio| MCP["Potter MCP server<br/><span style='color:#a3a3a3;font-size:11px'>executes tools</span>"]
+  MCP --> P1["Proxycurl<br/>LinkedIn data"]
+  MCP --> P2["Apify<br/>posts, fallback"]
+  MCP --> P3["Firecrawl<br/>web scrape"]
+  MCP --> P4["Stagehand<br/>browser"]
+  MCP -->|tool_result| CC`} />
+
+    <p className="text-sm text-ink-500">Layered view: harness owns the loop, MCP owns the tools, providers do the work.</p>
+
+    <p>Claude Code runs the <code>while (stop_reason === 'tool_use')</code> loop. The model decides <code>potter_research_company</code> is the right call. Claude Code routes that tool_use over MCP to your server. Your server hits Proxycurl. The result comes back as a tool_result. Loop continues.</p>
+
+    <p>This is why the spec says <strong>"no LLM inside the MCP except potter_browser_act."</strong> If you put a model call inside Potter, you would have a loop running inside a loop, with two different agents fighting over context and cost. The clean separation (harness owns the loop, MCP owns the tools) is what makes Potter composable. It also lets Potter work in any MCP-speaking harness, not just Claude Code.</p>
+  </PotterAngle>
+</div>
+
+</Section>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-token" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">token</p><p className="text-sm text-ink-700">Sub-word fragment the model operates on. Roughly four characters of English per token.</p></div>
+  <div id="glossary-context-window" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context window</p><p className="text-sm text-ink-700">Maximum tokens (input + output) the model can attend to in a single call. 200K standard, 1M extended.</p></div>
+  <div id="glossary-stop-reason" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">stop_reason</p><p className="text-sm text-ink-700">Field on every API response telling you why generation stopped. Drives the agentic loop's control flow.</p></div>
+  <div id="glossary-tool-blocks" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool_use / tool_result</p><p className="text-sm text-ink-700">Content blocks. tool_use is the model asking to run a function; tool_result is your response with the output.</p></div>
+  <div id="glossary-harness" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">harness</p><p className="text-sm text-ink-700">The program that runs the agentic loop, executes tools, and provides the user interface. Claude Code, Codex, Cursor, your custom script.</p></div>
+  <div id="glossary-temperature" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">temperature</p><p className="text-sm text-ink-700">Sampling parameter. 0 means deterministic-ish, higher means more variety in output.</p></div>
+  <div id="glossary-sse" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">SSE</p><p className="text-sm text-ink-700">Server-Sent Events. The streaming format the API uses to deliver tokens incrementally.</p></div>
+  <div id="glossary-prompt-caching" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">prompt caching</p><p className="text-sm text-ink-700">Optimization that lets the API cache the prefix of repeated requests, charging much less for cached portions.</p></div>
+  <div id="glossary-mcp" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP</p><p className="text-sm text-ink-700">Model Context Protocol. The standard for exposing tools to LLM harnesses.</p></div>
+  <div id="glossary-parallel-tool-use" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">parallel tool use</p><p className="text-sm text-ink-700">A single model response containing multiple tool_use blocks the harness should run concurrently.</p></div>
+  <div id="glossary-byok" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">BYOK</p><p className="text-sm text-ink-700">"Bring your own key." A pattern where end users supply their own API credentials instead of going through a vendor's billing.</p></div>
+  <div id="glossary-stateless-api" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">stateless API</p><p className="text-sm text-ink-700">An HTTP API where the server does not persist any state about clients between requests. Anthropic's /v1/messages is stateless.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+Answer these in your own words before the next session. Click each to see how I would answer.
+
+<CheckQuestion id="m01-q1" question={'1. The API is described as "stateless". What does that mean in practice, and what is its consequence for how you write agent code?'}>
+The Anthropic API does not store any conversation state between requests. Every call is independent. You send the full messages array, you get a response, the server forgets you exist. The consequence: memory is a client-side problem. If your agent needs context from earlier turns, your harness must store that conversation history somewhere (in memory, in a database, in a file) and resend it on every call.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q2" question={'2. What does stop_reason: "tool_use" mean, and what happens next?'}>
+The model paused generation because it wants to call one or more tools. The harness reads the tool_use block(s) from the response, executes the named tool with the provided arguments, appends a user-role message containing tool_result blocks (one per tool_use, linked by tool_use_id), and calls the API again with the updated messages array. The loop repeats until stop_reason is end_turn.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q3" question="3. Why is the description field on a tool definition load-bearing, and what is the failure mode of getting it wrong?">
+The model picks which tool to call based almost entirely on the natural-language description and parameter docstrings. A vague description means the model either skips the tool when it should use it, or picks the wrong tool when two have overlapping descriptions. Tool descriptions are prompts, not docs. They are the model's only interface to your API surface.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q4" question="4. What does the harness add on top of the API that the API does not provide?">
+The loop, the tool registry, the tool execution, conversation persistence, permission prompts, file system access, subagent management, audit logs, and any UI. The API gives you one model call. The harness wraps that call in the loop that makes "agent" behavior possible. Claude Code, Codex, Cursor, n8n, and a 20-line custom script are all variations of the same basic harness shape.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q5" question="5. Why does temperature matter for agent design, and what setting would you pick for tool selection in production?">
+Temperature controls how random the model's token sampling is. With temperature above 0, the same input can produce different outputs across runs, including different tool selections for the same situation. For production tool selection, you usually want temperature 0 or very low. Identical inputs should pick the same tool to keep behavior predictable, debuggable, and testable. Raise temperature for creative or exploratory tasks where variety is the goal.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q6" question="6. In the Potter stack diagram, where does the agentic loop run? Why is that the right place for it?">
+The loop runs in Claude Code, the harness. Putting it there keeps Potter stateless and composable. Potter ships tools, Claude Code orchestrates. If the loop lived inside Potter you would have a model deciding tools inside another model's loop, doubling cost, fragmenting context, and tying Potter to a specific LLM. The MCP boundary exists precisely to keep these layers separate, and it lets Potter work in any MCP-speaking harness.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q7" question="7. What is prompt caching and why does it matter for a long agent loop?">
+Prompt caching lets the API cache a prefix of repeated requests, typically the system prompt and tool definitions, and charge a fraction of the normal price for cached reads. For an agent loop that calls the API 20 times in a session with the same 10K-token system prompt, caching cuts that 200K of repeated input tokens to roughly 20K cached reads. Same accuracy, around 80 to 90% cost reduction. You opt in by adding a cache_control marker at the boundary of cacheable content.
+</CheckQuestion>
+
+<CheckQuestion id="m01-q8" question="8. Name three things the 20-line agent skeleton lacks and where each capability comes from in production.">
+Examples: file system access (added by Claude Code or a custom toolset), permission prompts (added by Claude Code's UI layer), subagents (Module 02 patterns), streaming (change <code>create</code> to <code>stream</code> and consume events), caching (cache_control on system + tools), iteration cap (manual for-loop with break to prevent infinite tool loops), error handling (try/catch around tool execution, surfaced as is_error tool_results), observability (logging every call's usage and stop_reason, covered in Module 12).
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+Once you have read everything, played with the demos, passed the sandboxes, and answered the check questions in your own words, mark Module 01 as complete to unlock progress and award your first module badge.
+
+<CompleteBanner moduleId="m01" nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />
+
+</Section>
+
+<ModuleNav prevSlug={undefined} prevTitle={undefined} nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />

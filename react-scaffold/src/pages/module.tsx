@@ -1,40 +1,73 @@
-import { useParams, Link } from 'react-router';
+/// <reference types="vite/client" />
+
+import { lazy, Suspense, useMemo, type ComponentType } from 'react';
+import { Link, useParams } from 'react-router';
 import { getModuleBySlug } from '../data/modules';
 
-// Placeholder module page. MDX-based content modules will mount here
-// (one MDX file per module under src/content/, lazy-loaded by slug).
+interface MdxModule {
+  default: ComponentType;
+}
+
+const mdxModules = import.meta.glob<MdxModule>('../content/*.mdx', { eager: false });
+
+function loaderForSlug(slug: string) {
+  const matchingPath = Object.keys(mdxModules).find(
+    (path) => path.includes(`-${slug}.mdx`) || path.endsWith(`/${slug}.mdx`)
+  );
+  return matchingPath ? mdxModules[matchingPath] : null;
+}
+
+function ModuleLoading() {
+  return (
+    <div className="rounded-2xl bg-clay-bg p-8 shadow-soft">
+      <p className="text-sm text-ink-700">Loading module...</p>
+    </div>
+  );
+}
 
 export function ModulePage() {
   const { slug } = useParams<{ slug: string }>();
   const mod = slug ? getModuleBySlug(slug) : undefined;
 
+  const Content = useMemo(() => {
+    if (!mod) return null;
+    const loader = loaderForSlug(mod.slug);
+    return loader ? lazy(loader) : null;
+  }, [mod]);
+
   if (!mod) {
     return (
-      <div>
-        <p>Module not found.</p>
-        <Link to="/" className="underline">course hub</Link>
-      </div>
+      <article className="space-y-4">
+        <p className="font-heading text-2xl text-ink-900">Module not found</p>
+        <Link to="/" className="text-sm text-accent-coral underline">
+          course hub
+        </Link>
+      </article>
+    );
+  }
+
+  if (Content) {
+    return (
+      <article className="space-y-10">
+        <Suspense fallback={<ModuleLoading />}>
+          <Content />
+        </Suspense>
+      </article>
     );
   }
 
   return (
-    <article>
-      <Link to="/" className="text-sm font-mono text-neutral-500 hover:text-neutral-900">
-        ← course hub
-      </Link>
-      <header className="mt-6 mb-8">
-        <div className="text-xs font-mono uppercase tracking-wider text-neutral-500">
-          Module {mod.num} · Track {mod.track}
-        </div>
-        <h1 className="mt-2 text-3xl font-semibold tracking-tight">{mod.title}</h1>
-        <p className="mt-3 max-w-2xl text-neutral-600">{mod.lead}</p>
-      </header>
-      <div className="prose prose-neutral">
-        <p>
-          Content not yet ported. Once Batch 1-4 specs are signed off and the design is locked,
-          MDX content lands here.
+    <article className="space-y-8">
+      <header className="rounded-2xl bg-clay-cream p-12 shadow-soft">
+        <p className="mb-3 text-xs uppercase tracking-widest text-ink-700">
+          Module {mod.num} · {mod.track}
         </p>
-      </div>
+        <h1 className="mb-4 font-heading text-4xl text-ink-900">{mod.title}</h1>
+        <p className="text-lg text-ink-700">{mod.lead}</p>
+      </header>
+      <section className="rounded-2xl bg-clay-bg p-8 shadow-soft">
+        <p className="font-heading text-2xl text-ink-900">Content coming soon</p>
+      </section>
     </article>
   );
 }
