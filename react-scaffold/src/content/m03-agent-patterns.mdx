@@ -1,0 +1,417 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  AugmentedLlmExplorer,
+  OrchestratorWorkerWalkthrough,
+  testOrchestrator,
+  testPickPattern,
+  testRoute
+} from './m03-agent-patterns';
+
+<ModuleHero
+  kicker="Module 03 · Agent patterns"
+  title="Workflow, agent, or something in between"
+  lead={'Module 01 gave you the loop. This module gives you the shapes. Five canonical patterns, when to reach for each, and why the difference between a "workflow" and an "agent" is the most useful taxonomy line you can draw in this whole course.'}
+  trackId="foundations"
+/>
+
+<Toc items={[
+  { href: '#control-locus', label: 'Workflow vs agent: where control sits' },
+  { href: '#augmented-llm', label: 'The augmented LLM' },
+  { href: '#prompt-chaining', label: 'Prompt chaining' },
+  { href: '#routing', label: 'Routing' },
+  { href: '#parallelization', label: 'Parallelization' },
+  { href: '#orchestrator-workers', label: 'Orchestrator-workers' },
+  { href: '#evaluator-optimizer', label: 'Evaluator-optimizer' },
+  { href: '#subagents', label: 'Subagents in practice' },
+  { href: '#choosing', label: 'Choosing a pattern' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="control-locus" num={1} title="Workflow vs agent: where control sits">
+
+In Module 01 you wrote a single loop: `while (stop_reason === 'tool_use') { run_tools(); call_api(); }`. That loop is the seed of every multi-step LLM system. The patterns in this module are answers to one design question: *who decides what happens next?*
+
+Anthropic's [Building Effective Agents](https://www.anthropic.com/engineering/building-effective-agents) draws a clean line that this whole module is built around:
+
+- <GLink slug="workflow"><strong>workflow</strong></GLink> orchestrates LLMs and tools through predefined code paths. Your code holds the script. The LLM fills in slots inside that script.
+- <GLink slug="agent"><strong>agent</strong></GLink> dynamically directs its own process. The LLM holds the script. Your code provides the tools and runs the loop, but the LLM picks the next step.
+
+Both are useful. Both have failure modes. The mistake is treating "agent" as a level of sophistication and "workflow" as something simpler. A well-shaped workflow beats a poorly-shaped agent on cost, latency, and predictability for any task that has a stable structure. Reach for an agent when the structure of the task changes from one input to the next, and you cannot enumerate the steps in advance.
+
+### The same task, two shapes
+
+Imagine the task: *given a company URL, write a one-paragraph briefing for a sales call.*
+
+<Mermaid chart={`flowchart LR
+  subgraph WF["Workflow shape"]
+    A1[scrape homepage] --> A2[extract product]
+    A2 --> A3[fetch latest news]
+    A3 --> A4[draft paragraph]
+  end
+  subgraph AG["Agent shape"]
+    B1[task: write briefing] --> B2{LLM picks tool}
+    B2 -->|scrape| B3[homepage tool]
+    B2 -->|search| B4[news tool]
+    B2 -->|finish| B5[draft paragraph]
+    B3 --> B2
+    B4 --> B2
+  end`} />
+
+<p className="text-sm text-ink-500">Workflow: every step is in your code. Agent: the model picks the next step on every turn until it decides it has enough.</p>
+
+The workflow on the left runs the same four steps every time. Cheap, fast, debuggable, and falls over the moment a homepage uses an unusual layout or the news search returns nothing useful. The agent on the right adapts but costs more per run, takes longer, and is harder to test. Most production systems are not pure either side. They are workflows with one or two agentic steps inside.
+
+<Callout kind="info" title="The framing that matters.">
+Every pattern in this module is some answer to "how much do I script up front and how much do I let the model decide on the fly?" The implicit dial is the <GLink slug="autonomy-budget">autonomy budget</GLink>: how many decisions you are willing to hand to the model in exchange for adaptability.
+</Callout>
+
+</Section>
+
+<Section id="augmented-llm" num={2} title="The augmented LLM">
+
+Before the patterns, the building block. Anthropic's term for a single LLM call enriched with retrieval, tools, and memory is the <GLink slug="augmented-llm">augmented LLM</GLink>. Every pattern in this module is some arrangement of one or more augmented LLMs talking to each other.
+
+Click each capability to see what it adds and where its state lives:
+
+<AugmentedLlmExplorer />
+
+Treat this as the unit. When a pattern says "an LLM call," assume that call has retrieval and tools available unless we say otherwise. The patterns differ in *how many* augmented LLMs are involved, *how they are wired together*, and *who picks the next step*.
+
+</Section>
+
+<Section id="prompt-chaining" num={3} title="Prompt chaining">
+
+The simplest workflow shape. <GLink slug="prompt-chaining">Prompt chaining</GLink> decomposes a task into ordered steps, each one an LLM call, with your code carrying outputs forward.
+
+<CodeBlock lang="js">{`// pseudo-code, not a real API surface
+const outline   = await llm('Outline a paragraph about ' + topic);
+const draft     = await llm('Write the paragraph from this outline:\\n' + outline);
+const polished = await llm('Tighten the writing in this draft:\\n' + draft);
+return polished;`}</CodeBlock>
+
+Three calls, three prompts, three small jobs. Each prompt is shorter and more focused than one prompt asking for the whole thing. The model performs better on small jobs than long ones because attention does not have to cover as much in a single turn.
+
+### Where chaining wins
+
+- **Quality through narrowing.** Splitting a hard task into easy ones reduces error compounding. Each call only has to be right about its slice.
+- **Cheap gates between steps.** Your code can validate the outline before paying for the draft. If the outline is malformed, retry just that step.
+- **Smaller models for cheaper steps.** The outline call could go to Haiku and the draft to Opus. You pay the expensive token rate only where you need it.
+- **Predictable cost and latency.** Every run does N calls. You can budget exactly.
+
+### Where chaining breaks
+
+- **Brittleness on edge cases.** If step 2 needs information step 1 did not produce, the chain has no way to backtrack. You either widen step 1's prompt (defeating the point) or add error handling (defeating the simplicity).
+- **Implicit context loss.** Step 3 only sees step 2's output, not step 1's. If you need the original input at step 3 you have to thread it through manually.
+
+Chaining is the right starting shape for almost any structured task. Reach for the more dynamic patterns only after a chain visibly fails.
+
+</Section>
+
+<Section id="routing" num={4} title="Routing">
+
+<GLink slug="routing">Routing</GLink> is a workflow with a switch at the front. An LLM (or, often, a cheap classifier) reads the input and chooses one of N specialized downstream paths. Each path has its own prompt, tools, and possibly its own model.
+
+<CodeBlock lang="js">{`const intent = await classify(input, ['refund', 'billing', 'product_question', 'other']);
+
+switch (intent) {
+  case 'refund':           return await refundFlow(input);
+  case 'billing':          return await billingFlow(input);
+  case 'product_question': return await productFlow(input);
+  default:                 return await fallbackFlow(input);
+}`}</CodeBlock>
+
+Routing is what you do when one prompt cannot serve every request well. A refund email and a product question want different system prompts, different tone, different tool sets. Trying to handle both with a single prompt produces flabby output for everyone. Routing lets you specialize without forcing every conversation through the most expensive path.
+
+### Sandbox · Build a router
+
+Implement `route(input, rules)`. Given an input string and a list of rule objects shaped `{ name, keywords }`, return the `name` of the first rule whose keywords appear (case-insensitive) in the input. If no rule matches, return `'fallback'`. This is the deterministic half of routing. The "classify" step in production usually replaces this with a cheap LLM call when keywords are not enough.
+
+<Sandbox
+  id="m03-route"
+  mode="js"
+  prompt={<>Routing is a workflow with a switch at the front: classify the input, dispatch to a specialized lane. This sandbox builds the deterministic half. Implement <code>route(input, rules)</code> where <code>input</code> is a string like <code>"I want a refund please"</code> and <code>rules</code> is an array like <code>{'[{ name: "refund", keywords: ["refund", "money back"] }, { name: "billing", keywords: ["invoice", "charge"] }]'}</code>. Return the <code>name</code> of the first rule whose keywords appear in the input (case-insensitive substring match). Return the literal string <code>"fallback"</code> when no rule matches. Order matters: <code>"refund and invoice"</code> must hit <code>"refund"</code> because that rule comes first. Match case-insensitively, so <code>"CHARGE on my card"</code> still hits the billing rule.</>}
+  starter={`function route(input, rules) {
+  // your code here
+}
+
+return route;`}
+  test={testRoute}
+  hint={<>Lowercase the input once, then for each rule check whether <em>any</em> keyword (also lowercased) is included. <code>Array.prototype.some</code> on the rule's keywords plus <code>String.prototype.includes</code> on the input is the cleanest path.</>}
+/>
+
+### Two-stage routing
+
+Production routers are usually two stages: a cheap classifier (often Haiku, sometimes a regex or embeddings) decides the lane, and the lane-specific prompt does the actual work. The classifier is small enough that you can run it on every request without breaking your token budget. The lane prompts can be much larger because they only fire on requests that need them.
+
+</Section>
+
+<Section id="parallelization" num={5} title="Parallelization">
+
+Run multiple LLM calls at the same time and combine their outputs. Two flavors:
+
+- <GLink slug="sectioning"><strong>Sectioning</strong></GLink>: split the input into chunks that can be processed independently, then combine the results. Summarizing 50 product reviews by chunking into 5 sets of 10 is a sectioning workload.
+- <GLink slug="voting"><strong>Voting</strong></GLink>: run the same prompt multiple times to get diverse outputs, then aggregate (majority vote, average, max, ensemble). Useful when single-call output has too much variance and aggregation across runs gives a more stable answer.
+
+### Parallel tool use is parallelization at the model level
+
+The model can also do parallelization for you, inside a single response. Module 01 covered [tool use](/m/primitives#tool-use). When the requests are independent, the model emits multiple `tool_use` blocks in one assistant turn, and your harness should run them concurrently and return all `tool_result` blocks in a single user-role message. This is built-in <GLink slug="parallelization">parallelization</GLink>: three enrichment lookups become one round trip instead of three.
+
+By default the model decides whether to parallelize. If you want exactly one tool call at a time, set `tool_choice: { type: "auto", disable_parallel_tool_use: true }`. The default of letting the model choose is almost always what you want. Sequential tool use is usually a bug, not a feature.
+
+<Callout kind="warn" title="Voting is not magic averaging.">
+Running the same prompt five times and majority-voting only helps when the errors across runs are independent. If the prompt has a structural blind spot, every run will hit it the same way and voting will confidently agree on the wrong answer. Voting raises confidence on tasks the model can already mostly do, not on tasks it fundamentally cannot.
+</Callout>
+
+</Section>
+
+<Section id="orchestrator-workers" num={6} title="Orchestrator-workers">
+
+The <GLink slug="orchestrator-worker">orchestrator-worker</GLink> pattern flips the script. An orchestrator LLM looks at a task, decides what subtasks to spawn, dispatches each to a worker LLM (often with its own tools and context), and synthesizes the results into a final answer.
+
+This is the first pattern that crosses the line from workflow into agent territory. The orchestrator does not know the subtasks in advance. It reads the input and decides them. The same task can produce three subtasks on one input and seven on the next. Your code does not enumerate the steps. The model does.
+
+<Mermaid chart={`flowchart TD
+  In["task: research a company"] --> O["orchestrator LLM<br/><span style='color:#a3a3a3;font-size:11px'>plans subtasks</span>"]
+  O -->|"subtask 1: scrape homepage"| W1["worker 1"]
+  O -->|"subtask 2: pull LinkedIn posts"| W2["worker 2"]
+  O -->|"subtask 3: search recent news"| W3["worker 3"]
+  W1 --> S["synthesizer LLM<br/><span style='color:#a3a3a3;font-size:11px'>combines results</span>"]
+  W2 --> S
+  W3 --> S
+  W1 -.->|"empty? re-plan"| O
+  S --> Out["final briefing"]`} />
+
+<p className="text-sm text-ink-500">Orchestrator-worker. The orchestrator decides the cuts. Workers do the work. The synthesizer combines outputs. Dashed edge: optional re-plan path when a worker returns empty.</p>
+
+### Step through one orchestration
+
+<OrchestratorWorkerWalkthrough />
+
+### What makes this work
+
+- **Each worker has a small, clear job.** Smaller jobs mean smaller prompts mean fewer model errors per turn.
+- **Workers do not share context with each other.** Worker 2 cannot accidentally use Worker 1's bad data because it never saw it.
+- **The orchestrator can re-plan.** If a worker comes back empty, the orchestrator can spawn a different worker with a different approach instead of failing the whole run.
+
+### What goes wrong
+
+- **Token cost compounds.** Three workers plus an orchestrator plus a synthesizer is five LLM calls for one user turn. Latency adds up. [Prompt caching](/m/primitives#prompt-caching) on the shared system prompt is doing real work here.
+- **Worker handoff drift.** If the orchestrator's subtask description is vague, the worker fills in gaps creatively. Treat each subtask description as a tool description: it is the worker's only briefing.
+- **Synthesis is its own job.** Three good worker outputs do not combine themselves. The synthesis prompt is often where the orchestrator-worker pattern actually lives or dies.
+
+### Sandbox · Implement a tiny orchestrator
+
+You write the dispatcher. The orchestrator has already produced a plan. Implement `orchestrate(plan, runWorker)`: run every worker in parallel, attach each subtask's name to its output, and return an object mapping subtask name to result. `runWorker(subtask)` is provided. It is async. You must call them concurrently, not one at a time.
+
+<Sandbox
+  id="m03-orchestrator"
+  mode="js"
+  prompt={<>The orchestrator has produced the plan; you write the dispatcher that runs the workers. Concurrency is the whole point of this pattern: three independent enrichment calls should take one round-trip, not three. Implement <code>orchestrate(plan, runWorker)</code> where <code>plan</code> is shaped like <code>{'[{ name: "scrape", input: "acme.com" }, { name: "posts", input: "acme" }, { name: "news", input: "Acme funding" }]'}</code> and <code>runWorker(subtask)</code> is an async function the verifier provides. Kick off every worker concurrently and return an object mapping each subtask's <code>name</code> to its resolved result, like <code>{'{ scrape: "result-of-scrape", posts: "result-of-posts", news: "result-of-news" }'}</code>. The verifier times the run: three 60ms workers in parallel must finish under 140ms total. A sequential <code>await</code> loop fails the timing check even though the data shape would be correct.</>}
+  starter={`async function orchestrate(plan, runWorker) {
+  // your code here
+}
+
+return orchestrate;`}
+  test={testOrchestrator}
+  hint={<> <code>Promise.all(plan.map(runWorker))</code> kicks every worker off concurrently. <code>Promise.allSettled</code> works too as long as you extract <code>.value</code> from each settled entry. Then zip the results back into an object: <code>plan.reduce((acc, sub, i) =&gt; ({'{ ...acc, [sub.name]: results[i] }'}), {'{}'})</code> or a plain for-loop populating an object literal.</>}
+/>
+
+</Section>
+
+<Section id="evaluator-optimizer" num={7} title="Evaluator-optimizer">
+
+One LLM generates. Another LLM critiques. The first LLM revises based on the critique. Loop until the critic is satisfied or you hit an iteration cap.
+
+<CodeBlock lang="js">{`let draft = await generate(task);
+for (let i = 0; i < 3; i++) {
+  const critique = await evaluate(task, draft);
+  if (critique.verdict === 'good') break;
+  draft = await revise(task, draft, critique.feedback);
+}
+return draft;`}</CodeBlock>
+
+The <GLink slug="evaluator-optimizer">evaluator-optimizer</GLink> pattern is what you reach for when the model can produce *almost* the right output, but a second pair of eyes catches the kind of error a one-shot prompt misses. Translation polish, code review, prose tightening, structured-output validation. Anywhere the gap between "good enough" and "good" is a critique away.
+
+It works because the evaluator role is genuinely different from the generator role. Asking the same prompt to "write an answer and double-check it" rarely catches its own mistakes. Splitting into two distinct calls with different system prompts gets you the second pass the model could not do in one shot.
+
+<Callout kind="note" title="The hard part is the evaluator's rubric.">
+A vague evaluator gives vague feedback and the loop just churns. A precise rubric ("the answer must cite at least one source from the provided context, must be under 100 words, and must not invent product names") gets actionable revisions and a real stopping condition.
+</Callout>
+
+</Section>
+
+<Section id="subagents" num={8} title="Subagents in practice">
+
+The orchestrator-worker pattern, when you ship it, is what most harnesses call <GLink slug="subagent">subagents</GLink>. A subagent is a child LLM call (or a child loop) launched by the parent agent to handle a scoped piece of work. The parent waits, gets a single result back, and continues.
+
+Claude Code's `Agent` tool is the canonical example. The parent emits a `tool_use` block calling the `Agent` tool with a description and a prompt. Claude Code spawns a fresh agent loop with its own context window. That child runs to completion, returns a single text result, and the parent continues with that result as a `tool_result` block.
+
+<CodeBlock lang="json">{`{
+  "name": "Agent",
+  "input": {
+    "subagent_type": "Explore",
+    "description": "Find auth middleware",
+    "prompt": "Find files defining session token validation. Report paths and line ranges. Under 200 words."
+  }
+}`}</CodeBlock>
+
+### Why subagents exist
+
+- **Context isolation.** The parent does not pollute its own context with raw search results. The subagent reads ten files, summarizes, and returns one paragraph. The parent sees only the paragraph.
+- **Specialized prompts.** An "Explore" agent is read-only and prompted for fast lookups. A "Plan" agent is prompted to produce an implementation plan. The parent picks the right shape for the job.
+- **Parallelism.** The parent can emit two or three Agent `tool_use` blocks in a single turn and the harness runs them concurrently. Three independent searches finish in the time of one.
+
+### What you give up
+
+- **Subagents do not see parent context.** Files the parent has read, prior tool results, the conversation, none of it. The prompt you pass is the entire briefing.
+- **Cost.** Each subagent is a full agent loop with its own input, system prompt, and tool definitions. The parent pays for itself plus the children.
+- **Debugging surface area.** A subagent's reasoning is invisible from the parent's transcript. If the child returns a wrong answer, you have to inspect its loop separately.
+
+This is the same tradeoff you saw in the orchestrator-worker section, just packaged. Most harnesses (Claude Code, Codex, the Claude Agent SDK) ship their version of this primitive. Module 05 unpacks the harness side. Module 07 covers the managed-platform side.
+
+</Section>
+
+<Section id="choosing" num={9} title="Choosing a pattern">
+
+The decision is rarely "which one is best." It is "which one is the smallest shape that solves my task without breaking when the input shifts." Climb the ladder only when the simpler shape visibly fails on real inputs.
+
+<table className="w-full border-collapse overflow-hidden rounded-xl bg-clay-bg text-sm shadow-soft">
+  <thead>
+    <tr><th className="border border-ink-500/20 p-3 text-left">If your task is...</th><th className="border border-ink-500/20 p-3 text-left">Start with</th><th className="border border-ink-500/20 p-3 text-left">Climb to</th></tr>
+  </thead>
+  <tbody>
+    <tr><td className="border border-ink-500/20 p-3">One transformation, stable input</td><td className="border border-ink-500/20 p-3">Single augmented LLM call</td><td className="border border-ink-500/20 p-3">Chaining when the task gets too long for one prompt</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">Multiple transformations, fixed order</td><td className="border border-ink-500/20 p-3">Prompt chaining</td><td className="border border-ink-500/20 p-3">Routing if the first step branches by type</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">One of N stable input types</td><td className="border border-ink-500/20 p-3">Routing</td><td className="border border-ink-500/20 p-3">Parallelization inside each lane if needed</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">Independent subproblems, fixed shape</td><td className="border border-ink-500/20 p-3">Parallelization (sectioning)</td><td className="border border-ink-500/20 p-3">Orchestrator-workers when the shape varies</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">Variable subproblems, plan unknown up front</td><td className="border border-ink-500/20 p-3">Orchestrator-workers</td><td className="border border-ink-500/20 p-3">Full agent loop when even the orchestrator's plan needs to react</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">Output close to right but needs polish</td><td className="border border-ink-500/20 p-3">Evaluator-optimizer</td><td className="border border-ink-500/20 p-3">Stays here. This is its lane.</td></tr>
+    <tr><td className="border border-ink-500/20 p-3">Open-ended, many turns, environment feedback</td><td className="border border-ink-500/20 p-3">Agent loop with tools</td><td className="border border-ink-500/20 p-3">Subagents (see §8) only when one agent's context is the bottleneck</td></tr>
+  </tbody>
+</table>
+
+### The autonomy budget, made concrete
+
+Every step you hand to the model costs you predictability and buys you adaptability. A one-shot prompt is fully predictable and fully rigid. A full agent loop with twenty tool calls is fully adaptive and barely auditable. Most production systems sit in the middle: a workflow that wraps one or two agent steps, where the dynamic decisions are bounded by the static structure around them.
+
+The rule of thumb: **script the parts that never change. Hand the parts that vary by input to the model.** A briefing pipeline can hard-code "scrape, then enrich, then write" but use an agent loop inside the enrichment step because what to enrich varies by company. The shape of the system stays predictable. The flexibility lives where it has to.
+
+### Sandbox · Pick the pattern
+
+You are the architect. For each task description, return the right pattern name. Valid returns: `"chaining"`, `"routing"`, `"parallel"`, `"orchestrator"`, `"evaluator"`, `"agent"`. The verdicts in this sandbox are normative, not aesthetic. They reflect the table above.
+
+<Sandbox
+  id="m03-pick-pattern"
+  mode="js"
+  prompt={<>Pattern choice is the architect's call: every step you hand to the model buys adaptability and costs predictability, so pick the smallest shape that solves the task. Implement <code>pick(task)</code> where <code>task</code> is shaped like <code>{'{ shape: "fixed-order-multi-step" }'}</code>. Return one of <code>"chaining"</code>, <code>"routing"</code>, <code>"parallel"</code>, <code>"orchestrator"</code>, <code>"evaluator"</code>, or <code>"agent"</code> based on the shape. The mappings: <code>fixed-order-multi-step</code> to <code>chaining</code>, <code>one-of-N-types</code> to <code>routing</code>, <code>independent-chunks</code> to <code>parallel</code>, <code>plan-unknown-up-front</code> to <code>orchestrator</code>, <code>almost-right-needs-polish</code> to <code>evaluator</code>, <code>open-ended-environment-feedback</code> to <code>agent</code>. For any other shape return <code>null</code> or <code>undefined</code>; do not return one of the six pattern names as a guess.</>}
+  starter={`function pick(task) {
+  // your code here
+}
+
+return pick;`}
+  test={testPickPattern}
+  hint={<>A simple object map keyed by <code>task.shape</code> covers all six. The unknown case can return <code>null</code> or <code>undefined</code>; do not return a real pattern name when nothing matches.</>}
+/>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Where Potter sits in this taxonomy</h3>
+
+    <p>Potter is a tool surface. It is not an agent. Internally, every Potter function is a <GLink slug="workflow">workflow</GLink>: scripted code paths that hit one or more enrichment providers, normalize the response, and return a structured result. There is exactly one exception. <code>potter_browser_act</code> is the one tool with an LLM inside it (Stagehand drives a browser action with a model in the loop). Everywhere else, Potter is predefined paths.</p>
+
+    <p>The agent lives outside Potter, in the harness. Claude Code (or any other MCP-speaking harness) holds the agent loop. It picks tools. It decides when to stop. Potter just executes whatever tool the harness asks for and returns a <code>tool_result</code>.</p>
+
+    <p>This is a deliberate split that maps onto every pattern in this module:</p>
+    <ul className="list-disc space-y-2 pl-5">
+      <li>When a Potter user runs a research query, the <strong>harness is the agent</strong>. It might call <code>potter_research_company</code>, then <code>potter_linkedin_posts</code>, then <code>potter_web_search</code>, deciding the next call based on what came back.</li>
+      <li>Inside <code>potter_research_company</code>, Potter runs a <strong>chain</strong>: hit Proxycurl, fall back to Apify if needed, normalize, return.</li>
+      <li>Inside <code>potter_find_decision_maker</code>, Potter runs a <strong>parallel</strong> shape: query several providers concurrently, pick the best result.</li>
+      <li>Inside <code>potter_browser_act</code>, there is a <strong>small agent</strong>: Stagehand interprets a natural-language instruction and decides which DOM actions to take.</li>
+    </ul>
+
+    <p>The lesson is the locus of control. The agent loop runs in the harness because that is the only place that knows what the user wants. Potter's job is to make tools available and run them deterministically when called. The patterns in this module are how you decide where to put each loop. Potter's design is one valid answer.</p>
+  </PotterAngle>
+</div>
+
+</Section>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-workflow" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">workflow</p><p className="text-sm text-ink-700">A system where LLMs and tools are orchestrated through predefined code paths. Your code holds the script.</p></div>
+  <div id="glossary-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">agent</p><p className="text-sm text-ink-700">A system where the LLM dynamically directs its own process and tool usage. The model holds the script.</p></div>
+  <div id="glossary-augmented-llm" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">augmented LLM</p><p className="text-sm text-ink-700">A single LLM call enriched with retrieval, tools, and memory. The atomic unit every pattern in this module is built from.</p></div>
+  <div id="glossary-prompt-chaining" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">prompt chaining</p><p className="text-sm text-ink-700">Workflow pattern: decompose a task into ordered LLM calls, each one a smaller, more focused job than the original.</p></div>
+  <div id="glossary-routing" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">routing</p><p className="text-sm text-ink-700">Workflow pattern: classify the input and dispatch to one of N specialized downstream paths.</p></div>
+  <div id="glossary-parallelization" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">parallelization</p><p className="text-sm text-ink-700">Running multiple LLM calls concurrently and combining outputs. Two flavors: sectioning (different chunks) and voting (same prompt, multiple runs).</p></div>
+  <div id="glossary-sectioning" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">sectioning</p><p className="text-sm text-ink-700">Parallelization variant: split the input into independent chunks, run each in parallel, combine the results.</p></div>
+  <div id="glossary-voting" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">voting</p><p className="text-sm text-ink-700">Parallelization variant: run the same prompt N times to get diverse outputs, then aggregate (majority vote, average, ensemble). The aggregation step reduces variance. Does not help with structural blind spots.</p></div>
+  <div id="glossary-orchestrator-worker" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">orchestrator-worker</p><p className="text-sm text-ink-700">Pattern: an orchestrator LLM plans subtasks at runtime, dispatches each to a worker LLM, and synthesizes the worker outputs.</p></div>
+  <div id="glossary-evaluator-optimizer" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">evaluator-optimizer</p><p className="text-sm text-ink-700">Pattern: a generator LLM produces output, an evaluator LLM critiques it, the generator revises. Loops until the evaluator passes or a cap is hit.</p></div>
+  <div id="glossary-subagent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">subagent</p><p className="text-sm text-ink-700">A child agent loop launched by the parent. Has its own context window and tools, returns a single result, does not see parent context.</p></div>
+  <div id="glossary-autonomy-budget" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">autonomy budget</p><p className="text-sm text-ink-700">The implicit dial in every pattern: how many decisions you hand to the model in exchange for adaptability. Higher autonomy means more flexibility and less predictability.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+Answer these in your own words before the next session. Click each to see how I would answer.
+
+<CheckQuestion id="m03-q1" question="1. What is the load-bearing distinction between a workflow and an agent? Why does it matter for system design?">
+A workflow orchestrates LLMs and tools through predefined code paths your application controls. An agent dynamically directs its own process: the model picks the next step at each turn. The distinction matters because agents pay extra cost and latency for adaptability, and you only want to pay that when the structure of the task actually varies by input. A workflow with one or two agent steps inside is the most common production shape.
+</CheckQuestion>
+
+<CheckQuestion id="m03-q2" question="2. The model returns three tool_use blocks in one response. What does that mean and what should the harness do?">
+The model is asking for three tool calls and judged them independent enough to run in one round trip. The harness should execute all three concurrently (Promise.all, asyncio.gather, the equivalent in your runtime) and return all three <code>tool_result</code> blocks in a single user-role message. Returning them sequentially or in separate user messages defeats the parallelism the model already opted into. Default behavior leaves parallel tool use enabled. Disable it only with <code>tool_choice.disable_parallel_tool_use: true</code>, and only when sequential ordering matters for correctness.
+</CheckQuestion>
+
+<CheckQuestion id="m03-q3" question="3. When does prompt chaining outperform a single bigger prompt, and when does it underperform?">
+Chaining wins when the task decomposes cleanly into smaller jobs, each easier than the whole. The model performs better on small, focused prompts; you can validate intermediate outputs cheaply; you can use cheaper models on cheaper steps. Chaining loses when later steps need information you did not anticipate at earlier steps, when input context has to thread through multiple hops, or when the decomposition itself is the variable thing (in which case orchestrator-workers fits better because the orchestrator picks the cuts at runtime).
+</CheckQuestion>
+
+<CheckQuestion id="m03-q4" question="4. The two flavors of parallelization are sectioning and voting. What is each one good for, and what does voting fail to fix?">
+Sectioning splits the input into independent chunks and processes each in parallel: summarizing fifty reviews by chunking into five batches of ten. Voting runs the same prompt multiple times and aggregates: majority vote, average, ensemble. Sectioning is for throughput and context-window relief. Voting is for variance reduction. Voting does not fix structural blind spots: if every run gets the same wrong answer for the same reason, the majority will confidently agree on the wrong answer. Voting only helps when errors across runs are roughly independent.
+</CheckQuestion>
+
+<CheckQuestion id="m03-q5" question="5. In the orchestrator-worker pattern, why does the synthesis step usually need its own dedicated prompt rather than letting the orchestrator do it inline?">
+Three good worker outputs do not combine themselves. Synthesis is a different cognitive job from planning: it has to read multiple inputs, resolve conflicts, drop irrelevant detail, and produce one coherent answer in the shape the user expects. Asking the orchestrator to "plan, dispatch, and also write the final answer" overloads its context with raw worker outputs and dilutes the planning prompt. A dedicated synthesis prompt sees only the worker outputs and the original goal, with a clear job to do. It usually goes to the same model the orchestrator uses, but with a different system prompt.
+</CheckQuestion>
+
+<CheckQuestion id="m03-q6" question="6. A subagent in Claude Code is launched via the Agent tool. What does the parent give up by delegating, and what does it gain?">
+Gives up: visibility into the child's reasoning trace (only the final result comes back), the ability to share parent context (the child cannot see files the parent read or prior tool results), and a real cost line item (each subagent is its own agent loop with its own input + system prompt + tool definitions). Gains: context isolation (parent does not get polluted with raw search results), specialization (Explore is read-only and tuned for fast lookups, Plan is tuned for design proposals), and parallelism (multiple Agent tool_use blocks in one turn run concurrently). Use a subagent when the work has a clean boundary and you want a one-paragraph result, not when you need the parent to participate in the reasoning.
+</CheckQuestion>
+
+<CheckQuestion id="m03-q7" question="7. You are designing a system that takes a customer support email and produces a reply. The email type varies (refund, billing, product question, other). Each type needs a different tone, different RAG sources, and different escalation rules. What pattern fits, and where does it sit on the autonomy budget?">
+Routing. A cheap classifier (Haiku, embeddings, or a regex if the keywords are unambiguous) reads the email and tags one of four types. Each lane has its own system prompt, its own retrieval scope, and its own escalation logic. This sits low on the autonomy budget: the structure of the system is fully scripted, and the only "agent" decision is the lane choice. You get specialization without paying for full agent autonomy on every email. Climb to a real agent loop only inside lanes where the resolution genuinely varies turn by turn (e.g., a multi-turn refund conversation that has to look up order history, send confirmations, and update tickets).
+</CheckQuestion>
+
+<CheckQuestion id="m03-q8" question={'8. Why is "always reach for the most flexible pattern" the wrong default, and what is the right one?'}>
+Flexibility is not free. Each step of autonomy you grant the model trades predictability and cost for adaptability. A full agent loop on a task that could be a chain wastes tokens, adds latency, makes evaluation harder, and surfaces a class of failure modes (infinite tool loops, drift, runaway iteration) that scripted code does not have. The right default: start with the smallest pattern that fits, and climb only when the simpler shape demonstrably fails on real inputs. Most "we need an agent" tasks are actually chains, routes, or orchestrator-workers in disguise.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+Once you have read everything, played with the demos, passed the sandboxes, and answered the check questions in your own words, mark Module 03 as complete.
+
+<CompleteBanner moduleId="m03" nextSlug="prompt-engineering" nextTitle="Module 04 · Prompt engineering for agents" />
+
+</Section>
+
+<ModuleNav prevSlug="primitives" prevTitle="Module 01 · Primitives" nextSlug="prompt-engineering" nextTitle="Module 04 · Prompt engineering for agents" />
