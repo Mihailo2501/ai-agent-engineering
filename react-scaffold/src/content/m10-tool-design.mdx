@@ -89,7 +89,7 @@ The shape that wins:
 1. **What the tool does, in one sentence.** "Look up a company by domain. Returns name, size, industry, headquarters."
 2. **When to call this.** "Use this when the user mentions a company name or domain and asks about who they are, what they do, or how big they are."
 3. **When NOT to call this.** "Do not call for individuals; lookup_person covers that."
-4. **What the output looks like.** Critical when the agent needs to chain calls: "Returns { name, size, industry, hq } as a JSON object."
+4. **What the output looks like.** Critical when the agent needs to chain calls: "Returns `{ name, size, industry, hq }` as a JSON object."
 
 A vague description has none of these; a great description has all four. The "when NOT to call" beat is the one most people skip, and it is the one that fixes most selection drift between tools with overlapping coverage.
 

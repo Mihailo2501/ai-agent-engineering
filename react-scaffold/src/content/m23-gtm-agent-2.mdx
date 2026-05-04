@@ -198,7 +198,7 @@ The `hook_for_outbound` field is what makes this composable with M22. The hook b
 <Sandbox
   id="m23-format-brief"
   mode="js"
-  prompt={<>Implement <code>formatBrief(rawResearch)</code> taking a research blob and returning the canonical brief object with all required fields: <code>company</code>, <code>raise_amount</code>, <code>round_type</code>, <code>why_relevant</code>, <code>decision_maker</code>, <code>hook_for_outbound</code>, <code>recommended_action</code>. All fields must be non-empty strings. Reasonable defaults: pull <code>company</code> from <code>raw.company_name</code>, <code>raise_amount</code> and <code>round_type</code> from raw, decision_maker as <code>"{`${name} (${role})`}"</code> from <code>raw.founder</code>, hook_for_outbound from <code>raw.recent_post</code> or a sensible fallback.</>}
+  prompt={<>Implement <code>formatBrief(rawResearch)</code> taking a research blob and returning the canonical brief object with all required fields: <code>company</code>, <code>raise_amount</code>, <code>round_type</code>, <code>why_relevant</code>, <code>decision_maker</code>, <code>hook_for_outbound</code>, <code>recommended_action</code>. All fields must be non-empty strings. Reasonable defaults: pull <code>company</code> from <code>raw.company_name</code>, <code>raise_amount</code> and <code>round_type</code> from raw, decision_maker as <code>{'"${name} (${role})"'}</code> from <code>raw.founder</code>, hook_for_outbound from <code>raw.recent_post</code> or a sensible fallback.</>}
   starter={`function formatBrief(raw) {
   // your code here
 }

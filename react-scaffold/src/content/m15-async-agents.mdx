@@ -263,7 +263,7 @@ Where to send:
 <Sandbox
   id="m15-idempotency-key"
   mode="js"
-  prompt={<>Implement <code>idempotencyKey({"{ source, id, version }"})</code> returning a stable string of the form <code>{`"${source}:${id}:v${version}"`}</code>. Validate that <code>id</code> is a non-empty string; throw otherwise. Same input always returns the same key. Different version produces a different key.</>}
+  prompt={<>Implement <code>idempotencyKey({"{ source, id, version }"})</code> returning a stable string of the form <code>{'"${source}:${id}:v${version}"'}</code>. Validate that <code>id</code> is a non-empty string; throw otherwise. Same input always returns the same key. Different version produces a different key.</>}
   starter={`function idempotencyKey({ source, id, version }) {
   // your code here
 }
