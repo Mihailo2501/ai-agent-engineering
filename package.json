@@ -6,10 +6,13 @@
   "description": "Self-paced course on AI agent engineering. 25 modules, 5 tracks, hands-on sandboxes against the Anthropic API.",
   "license": "MIT",
   "scripts": {
+    "predev": "node scripts/build-glossary.mjs",
     "dev": "vite",
+    "prebuild": "node scripts/build-glossary.mjs",
     "build": "tsc -b && vite build",
     "preview": "vite preview",
-    "lint": "eslint . --ext ts,tsx"
+    "lint": "eslint . --ext ts,tsx",
+    "build:glossary": "node scripts/build-glossary.mjs"
   },
   "dependencies": {
     "@codemirror/commands": "^6.6.0",

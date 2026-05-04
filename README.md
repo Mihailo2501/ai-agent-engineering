@@ -121,7 +121,7 @@ BYOK only. Course code sends your Anthropic API key only to `api.anthropic.com`.
 
 ## acknowledgments
 
-Built as a study aid for the transition into AI agent engineering full-time. The running case study, [Potter](https://github.com/Mihailo2501/potter-mcp), is an open-source MCP server in the same family of projects.
+I built this to teach myself how AI agents actually work, end to end. The running case study throughout is [Potter](https://github.com/Mihailo2501/potter-mcp), my open-source MCP server.
 
 Visual chrome (mascot, hero illustrations, module icons, track icons, badges) generated via [OpenAI Codex CLI](https://github.com/openai/codex) using GPT image 2. Module content authored with [Claude Code](https://github.com/anthropics/claude-code).
 

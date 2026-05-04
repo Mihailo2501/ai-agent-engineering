@@ -1,0 +1,2630 @@
+[
+  {
+    "id": "mcp-json",
+    "term": ".mcp.json",
+    "definition": "Claude Code's per-project MCP server configuration.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "agents-dir",
+    "term": "/.claude/agents",
+    "definition": "Where subagent definitions live. One markdown file per subagent.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "act-mode",
+    "term": "act() mode",
+    "definition": "Stagehand's LLM-driven action mode: describe what you want in natural language, model picks selector and action.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "agent",
+    "term": "agent",
+    "definition": "A system where the LLM dynamically directs its own process and tool usage. The model holds the script.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "aider",
+    "term": "Aider",
+    "definition": "Terminal-driven coding agent with diff-based edit workflow.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "anti-detection",
+    "term": "anti-detection",
+    "definition": "Techniques to make automated browser sessions look like real users.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "apify",
+    "term": "Apify",
+    "definition": "Web scraping platform Potter uses as a fallback to Proxycurl.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "arktype",
+    "term": "ArkType",
+    "definition": "TypeScript schema library with runtime and compile-time type alignment.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "asr",
+    "term": "ASR",
+    "definition": "Automatic speech recognition. Audio in, text out. Whisper is the default; many hosted variants exist.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "asr-voice",
+    "term": "ASR",
+    "definition": "Automatic speech recognition. Audio in, text out. Whisper, Deepgram, AssemblyAI.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "attendee-dedupe",
+    "term": "attendee dedupe",
+    "definition": "Skip re-researching an attendee already briefed in the past 30 days. Use cached brief if recent.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "audit-log",
+    "term": "audit log",
+    "definition": "Persistent record of every tool call, decision, and approval the harness handled.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "audit-trail",
+    "term": "audit trail",
+    "definition": "Persistent, structured record of every agent decision and tool call.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "augmented-llm",
+    "term": "augmented LLM",
+    "definition": "A single LLM call enriched with retrieval, tools, and memory. The atomic unit every pattern in this module is built from.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "autonomous-pr",
+    "term": "autonomous PR",
+    "definition": "Long-running agent that opens its own pull request.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "autonomy-budget",
+    "term": "autonomy budget",
+    "definition": "The implicit dial in every pattern: how many decisions you hand to the model in exchange for adaptability. Higher autonomy means more flexibility and less predictability.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "background-agent",
+    "term": "background agent",
+    "definition": "An agent run on a schedule or in response to events, no user blocking.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "barge-in",
+    "term": "barge-in",
+    "definition": "The ability for the user to interrupt the agent mid-speech.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "batch-api",
+    "term": "batch API",
+    "definition": "An API tier that processes requests asynchronously at lower cost and longer latency. Roughly half-price on Anthropic and OpenAI.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "batch-api-async",
+    "term": "batch API",
+    "definition": "API tier that processes requests asynchronously at lower cost.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "batch-api-cost",
+    "term": "batch API",
+    "definition": "Async tier with 50% cost discount and 24-hour SLA.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "batch-brief",
+    "term": "batch-brief",
+    "definition": "Potter's background runtime for scheduled enrichment jobs.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "behavioral-eval",
+    "term": "behavioral eval",
+    "definition": "Eval that scores whether the agent took the right actions, not just whether the final answer was right.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "bland",
+    "term": "Bland",
+    "definition": "Outbound voice agent platform, often used for high-volume sales and reminders.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "braintrust",
+    "term": "Braintrust",
+    "definition": "Hosted eval platform for LLM apps.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "brief",
+    "term": "brief",
+    "definition": "The structured one-page summary per qualified company, fed to outbound or sales.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "brief-meeting",
+    "term": "brief",
+    "definition": "Structured one-page document delivered to the user before the meeting.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "brief-pdf",
+    "term": "brief PDF",
+    "definition": "Long-form artifact (using Remotion) attached to the Slack message for top hits.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "browser-act-exception",
+    "term": "browser-act exception",
+    "definition": "The one Potter tool that calls an LLM internally, used for dynamic UI navigation.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "browserbase",
+    "term": "Browserbase",
+    "definition": "Managed cloud browser runtime for agents. Sessions, contexts, proxies, anti-detection.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "build-vs-buy",
+    "term": "build vs buy",
+    "definition": "The decision to handcraft a harness (build) vs use a managed platform (buy).",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "byok",
+    "term": "BYOK",
+    "definition": "\"Bring your own key.\" A pattern where end users supply their own API credentials instead of going through a vendor's billing.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "cache-marker",
+    "term": "cache marker",
+    "definition": "The cache_control field added to a content block to mark it cacheable.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "cache-ttl",
+    "term": "cache TTL",
+    "definition": "How long a cached prefix remains warm. Anthropic's ephemeral cache is roughly 5 minutes.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "cached-input",
+    "term": "cached input",
+    "definition": "Repeated prompt prefixes that are billed at a fraction of standard input rate.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "calendar-webhook",
+    "term": "calendar webhook",
+    "definition": "Push notification from a calendar service (Calendly, Google Calendar) on new event creation.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "canary",
+    "term": "canary deployment",
+    "definition": "Rolling out a change to a small fraction of traffic before full rollout.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "canonical-url",
+    "term": "canonical URL",
+    "definition": "Normalized form of a company URL (lowercase, no www, trailing slash stripped) used as a stable identifier.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "capability-gate",
+    "term": "capability gate",
+    "definition": "A check before a tool runs, classifying it as auto-allowed, confirm-required, or denied.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "capability-negotiation",
+    "term": "capability negotiation",
+    "definition": "The MCP handshake where client and server agree on which features are supported.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "capability-spec",
+    "term": "capability spec",
+    "definition": "A locked document defining what a major version of a tool layer must do, with concrete acceptance criteria.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "chain-of-thought",
+    "term": "chain-of-thought",
+    "definition": "Reasoning trace before the answer. Without tools, prone to fabrication. With tools, becomes ReAct.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "chunking",
+    "term": "chunking",
+    "definition": "Splitting documents into smaller pieces for embedding and retrieval.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "claude-agent-sdk",
+    "term": "Claude Agent SDK",
+    "definition": "Anthropic's first-party SDK (TypeScript and Python) for building agents on top of the Claude API with first-party loop, tools, memory, and hooks.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "claude-code-coding",
+    "term": "Claude Code",
+    "definition": "Anthropic's terminal-based coding agent harness. Module 8 covers the extension surface.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "cli",
+    "term": "CLI",
+    "definition": "Command-line tool layered on top of the SDK that adds UI, file access, permissions, hooks, subagents.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "code-fence-wrap",
+    "term": "code fence wrap",
+    "definition": "Common failure where the model wraps JSON in markdown code fences, breaking parsers.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "codex-cli",
+    "term": "Codex CLI",
+    "definition": "OpenAI's coding agent CLI. Interactive mode plus a non-interactive `codex exec` entry point used for review-shaped runs and CI integrations.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "coding-agent",
+    "term": "coding agent",
+    "definition": "An agent specialized for code: file system as state, tests as eval, git as reversibility.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "context-bloat",
+    "term": "context bloat",
+    "definition": "Unbounded growth of conversation context that inflates per-call cost.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "context-budget",
+    "term": "context budget",
+    "definition": "The harness's strategy for keeping conversation context under the model's window.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "context-compaction",
+    "term": "context compaction",
+    "definition": "Replacing earlier conversation turns with a summary to free working memory.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "context-window",
+    "term": "context window",
+    "definition": "Maximum tokens (input + output) the model can attend to in a single call. 1M on Opus 4.7 and Sonnet 4.6; 200K on Haiku 4.5.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "conversation-hook",
+    "term": "conversation hook",
+    "definition": "A specific recent fact about the attendee or company worth mentioning in the meeting opening.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "cron",
+    "term": "cron",
+    "definition": "Scheduling pattern that runs work at fixed intervals (every minute, hour, day).",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "cursor-agent",
+    "term": "Cursor",
+    "definition": "Editor with built-in agent mode and rules files.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "custom-harness",
+    "term": "custom harness",
+    "definition": "A harness you wrote yourself, usually 50 to 500 lines, scoped to one job.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "dataset-drift",
+    "term": "dataset drift",
+    "definition": "Production inputs diverging from the golden dataset over time.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "dead-letter",
+    "term": "dead-letter queue",
+    "definition": "Where failed events land after max retries.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "decoding",
+    "term": "decoding",
+    "definition": "The rule for picking the next token from the model's output probability distribution.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "dedupe-runs",
+    "term": "dedupe across runs",
+    "definition": "Preventing the same company from surfacing in two consecutive weekly digests.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "deprecation-flag",
+    "term": "deprecation flag",
+    "definition": "Marking a tool as discouraged in its description so the model avoids picking it.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "description-as-prompt",
+    "term": "description-as-prompt",
+    "definition": "The principle that tool descriptions function as prompts, not docs, because the model reads them to decide.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "devin",
+    "term": "Devin",
+    "definition": "Cognition's autonomous coding agent that ships GitHub PRs.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "diff-style",
+    "term": "diff-style edit",
+    "definition": "Agent edits expressed as diffs to the working tree, applied atomically.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "direct-injection",
+    "term": "direct injection",
+    "definition": "Injection from the user typing into the agent.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "dkim-spf",
+    "term": "DKIM/SPF",
+    "definition": "Domain authentication records that help receiving mail servers trust that a sender is legitimate.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "document-understanding",
+    "term": "document understanding",
+    "definition": "Models or APIs designed for PDFs, docx, structured documents, with layout and table awareness.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "dry-run",
+    "term": "dry-run flag",
+    "definition": "Mandatory --dry-run mode that logs what would happen without creating Gmail drafts.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "dual-control",
+    "term": "dual-control gate",
+    "definition": "Pattern where two parties (e.g. agent and human) must approve a privileged action.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "durable-execution",
+    "term": "durable execution",
+    "definition": "Workflow execution that survives crashes via persisted state. Inngest, Trigger.dev, Temporal.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "embedding",
+    "term": "embedding",
+    "definition": "A vector representation of text used for semantic similarity.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "enum",
+    "term": "enum",
+    "definition": "A schema constraint that limits a field to a closed list of values.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "ephemeral-delivery",
+    "term": "ephemeral delivery",
+    "definition": "Brief delivered to a Slack DM (private) and optionally expiring 24h after the meeting.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "episodic-memory",
+    "term": "episodic memory",
+    "definition": "Records of past sessions, persisted, retrievable by user or time.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "escalation",
+    "term": "escalation",
+    "definition": "Surfacing a stuck job to a human after retries are exhausted.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "escalation-rate",
+    "term": "escalation rate",
+    "definition": "Fraction of runs that surface to a human reviewer. A signal of agent quality.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "eval-framework",
+    "term": "eval framework",
+    "definition": "Built-in tooling for golden tests, LLM-as-judge, regression. Module 16 deep-dives.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "eval-pyramid",
+    "term": "eval pyramid",
+    "definition": "Layered testing strategy: unit, behavioral, golden, red-team, production sampling.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "evaluator-optimizer",
+    "term": "evaluator-optimizer",
+    "definition": "Pattern: a generator LLM produces output, an evaluator LLM critiques it, the generator revises. Loops until the evaluator passes or a cap is hit.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "exponential-backoff",
+    "term": "exponential backoff",
+    "definition": "Retry policy where delay doubles each attempt, capped.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "extended-thinking",
+    "term": "extended thinking",
+    "definition": "Anthropic's reasoning mode. You opt in via a thinking budget; response includes thinking content blocks alongside text and tool_use.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "external-attendee",
+    "term": "external attendee",
+    "definition": "Meeting participant whose email domain is not in the user's internal-domain list.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "extraction",
+    "term": "extraction",
+    "definition": "The pattern of pulling specific fields out of unstructured text into a structured object.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "few-shot",
+    "term": "few-shot",
+    "definition": "Including worked examples in the prompt. Strong tool for format and edge-case control. Easy to overuse.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "fine-tuning",
+    "term": "fine-tuning",
+    "definition": "Updating model weights on your data. Rarely beats RAG for agents.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "firecrawl",
+    "term": "Firecrawl",
+    "definition": "Web crawl provider Potter uses for general web research.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "flake",
+    "term": "flake",
+    "definition": "A test or automation that passes sometimes and fails sometimes for non-deterministic reasons.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "force-tool-choice",
+    "term": "force_tool_choice",
+    "definition": "API parameter that requires the model to call a specific tool, used for extraction.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "foreground-agent",
+    "term": "foreground agent",
+    "definition": "An agent run with a user waiting on the response.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "forward-pass",
+    "term": "forward pass",
+    "definition": "A single trip of input through every layer of the network, producing output logits.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "full-duplex",
+    "term": "full-duplex",
+    "definition": "Both sides can talk simultaneously. Phone-call mode.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "funding-source",
+    "term": "funding source",
+    "definition": "The data API or scraper providing this week's raise list. Crunchbase, Apify, NewsAPI, RSS.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "gdpr",
+    "term": "GDPR",
+    "definition": "EU regulation governing personal data processing. Affects agent design when EU users are in scope.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "gguf",
+    "term": "GGUF",
+    "definition": "The dominant quantization format for local inference.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "gmail-api-quota",
+    "term": "Gmail API quota",
+    "definition": "Per-user and per-project API limits that require pacing and retry behavior when creating drafts in batches.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "gmail-draft",
+    "term": "Gmail draft",
+    "definition": "An email saved in the user's Gmail Drafts folder through the Gmail API, not sent automatically.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "golden-dataset",
+    "term": "golden dataset",
+    "definition": "Fixed set of inputs with known expected outputs used as the eval baseline.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "google-agentspace",
+    "term": "Google Agentspace",
+    "definition": "Google Cloud's enterprise agent platform built on Vertex AI.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "greedy-decoding",
+    "term": "greedy decoding",
+    "definition": "Pick the highest-probability token at every step. Deterministic, often repetitive on long generations.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "greedy-decoding",
+    "term": "greedy decoding",
+    "definition": "Always pick the highest-probability next token. The limit of temperature 0. Most stable but most repetitive.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "model-tiers",
+    "term": "Haiku, Sonnet, Opus",
+    "definition": "Anthropic's three tiers, ordered cheap to capable, used in routing decisions.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "half-duplex",
+    "term": "half-duplex",
+    "definition": "One side talks at a time. Walkie-talkie mode.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "hallucination-drift",
+    "term": "hallucination drift",
+    "definition": "Increase in factual error rate over time, often after a model version change.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "harness",
+    "term": "harness",
+    "definition": "The program that runs the agentic loop, executes tools, and provides the user interface. Claude Code, Codex, Cursor, your custom script.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "harness",
+    "term": "harness",
+    "definition": "The CLI or app that runs the agent loop. Claude Code, Codex, Cursor, your custom script.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "harness",
+    "term": "harness",
+    "definition": "The program that runs the agent loop, manages tools, exposes UI.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "helicone",
+    "term": "Helicone",
+    "definition": "Hosted LLM observability and gateway service.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "hook",
+    "term": "hook",
+    "definition": "A user-defined callback the harness invokes at lifecycle events.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "hook-cc",
+    "term": "hook",
+    "definition": "Shell command Claude Code runs at a lifecycle event (e.g. before a tool call).",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "hosted-state",
+    "term": "hosted state",
+    "definition": "Agent state (sessions, memory) persisted on the vendor's servers rather than yours.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "http-api",
+    "term": "HTTP API",
+    "definition": "The raw endpoint a provider exposes. Lowest layer; you pay for everything above it.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "huggingface",
+    "term": "Hugging Face",
+    "definition": "The gravitational center of the open-weights ecosystem. Hub, Spaces, Datasets, Endpoints.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "hybrid-search",
+    "term": "hybrid search",
+    "definition": "Combining keyword (BM25) and vector similarity for retrieval.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "icp-filter",
+    "term": "ICP filter",
+    "definition": "Structured criteria (industry, stage, geography, headcount) used to qualify leads before deep research.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "icp-overfit",
+    "term": "ICP overfit",
+    "definition": "Filter so narrow it rejects warm leads. Detected via eval drift.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "idempotency-key",
+    "term": "idempotency key",
+    "definition": "A stable identifier preventing duplicate work when a job runs twice.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "idempotency-key-per-lead",
+    "term": "idempotency key per lead",
+    "definition": "Stable key, usually derived from normalized email, preventing the same lead from being processed twice.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "image-generation",
+    "term": "image generation",
+    "definition": "A model producing an image from a text prompt or a reference image. gpt-image-2, Flux, Stable Diffusion.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "image-to-code",
+    "term": "image-to-code",
+    "definition": "Workflow where a generated UI mockup is handed to a coding agent that produces matching JSX/CSS.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "indirect-injection",
+    "term": "indirect injection",
+    "definition": "Injection from data the agent reads (emails, PDFs, web pages, tool results).",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "inference",
+    "term": "inference",
+    "definition": "The runtime act of using a trained model. Each call is one forward pass through frozen weights.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "inference-provider",
+    "term": "inference provider",
+    "definition": "A company or piece of software that runs inference for you. Anthropic, OpenAI, Groq, Together, vLLM.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "inngest-cron",
+    "term": "Inngest cron",
+    "definition": "Inngest's cron primitive for durable scheduled jobs.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "inpainting",
+    "term": "inpainting",
+    "definition": "Image generation that edits a region of an existing image while keeping the rest. Sister to image-out from scratch.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "instruction-ordering",
+    "term": "instruction ordering",
+    "definition": "Where instructions sit in the prompt affects how strongly the model attends to them. Top and bottom positions carry more weight than the middle.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "internal-domain",
+    "term": "internal domain",
+    "definition": "Email domain belonging to the user's own organization. Used to filter attendees.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "is-error-flag",
+    "term": "is_error flag",
+    "definition": "The boolean field on tool_result that signals failure to the model.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "jailbreak",
+    "term": "jailbreak",
+    "definition": "An attack that tries to override the agent's safety constraints.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "jitter",
+    "term": "jitter",
+    "definition": "Randomization added to retry delays so clients do not sync up.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "json-mode",
+    "term": "JSON mode",
+    "definition": "An API setting that requires the response to be a valid JSON object.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "judge-agreement",
+    "term": "judge agreement",
+    "definition": "How often the LLM judge and a human reviewer agree on the same response.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "langfuse",
+    "term": "Langfuse",
+    "definition": "Open-source LLM observability platform.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "layer-lock-in",
+    "term": "layer lock-in",
+    "definition": "The cost of switching between API, SDK, CLI, MCP layers later in the project.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "llama-family",
+    "term": "Llama family",
+    "definition": "Meta's open-weights model line. Llama 3.x, Llama 4.x, etc.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "llama-cpp",
+    "term": "llama.cpp",
+    "definition": "The C++ inference engine under most local-model tools.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "llm-as-judge",
+    "term": "LLM-as-judge",
+    "definition": "Using a model to score another model's output against a rubric.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "llm-tell",
+    "term": "LLM-tell",
+    "definition": "A phrase that makes text read machine-written, such as \"just wanted to\" or \"touching base\".",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "lm-studio",
+    "term": "LM Studio",
+    "definition": "GUI app for running open-weights models locally.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "login-wall",
+    "term": "login wall",
+    "definition": "Authentication redirect that breaks deterministic flows. Often requires manual handoff.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "logits",
+    "term": "logits",
+    "definition": "Pre-softmax raw scores the model produces for each vocabulary token. Logits feed into the decoding rule.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "lora",
+    "term": "LoRA",
+    "definition": "Low-Rank Adaptation. Fine-tune a small subset of weights, cheap and fast.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "managed-platform",
+    "term": "managed agent platform",
+    "definition": "A vendor offering that runs your agent loop, persists state, ships deployment.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "max-tokens",
+    "term": "max_tokens",
+    "definition": "API parameter capping output length. Default values are usually too high for cost.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "mcp",
+    "term": "MCP",
+    "definition": "Model Context Protocol. The standard for exposing tools to LLM harnesses.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "mcp",
+    "term": "MCP",
+    "definition": "Model Context Protocol. Standard for exposing tools to LLM harnesses.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "mcp-attach",
+    "term": "MCP attach",
+    "definition": "The act of connecting an MCP server to a harness so its tools become available.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "mcp-prompts",
+    "term": "MCP prompts",
+    "definition": "Reusable prompt templates exposed by an MCP server, alongside tools.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "mcp-resources",
+    "term": "MCP resources",
+    "definition": "Read-only data sources exposed by an MCP server, alongside tools.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "mcp-server-potter",
+    "term": "MCP server (Potter)",
+    "definition": "The Potter runtime exposing tools via the Model Context Protocol.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "meeting-prep",
+    "term": "meeting prep",
+    "definition": "The pre-meeting research a salesperson does manually; this agent automates it.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "meeting-tz",
+    "term": "meeting TZ alignment",
+    "definition": "Delivering the brief 30 min before meeting in the meeting's local time, not the user's.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "memory-file",
+    "term": "memory tool",
+    "definition": "Anthropic's first-party memory primitive: file-system-style commands (view, create, str_replace, insert, delete, rename) over a /memories/ directory; storage is client-side.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "model-routing",
+    "term": "model routing",
+    "definition": "Picking a different model per turn or per use case based on cost or capability needs.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "multimodal",
+    "term": "multimodal",
+    "definition": "A model that accepts or produces more than one modality (text, image, audio, video).",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "namespace-prefix",
+    "term": "namespace prefix",
+    "definition": "A leading word identifying a tool's family (e.g. potter_research_*).",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "namespace-prefix-potter",
+    "term": "namespace prefix",
+    "definition": "Tool names beginning with the layer's identifier (potter_*) to disambiguate at scale.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "nano-banana",
+    "term": "nano-banana",
+    "definition": "Codename for a Google image generation model in the Gemini family.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "ollama",
+    "term": "Ollama",
+    "definition": "Wrapper around llama.cpp for easy local model serving. Default for most local inference.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "open-weights",
+    "term": "open-weights",
+    "definition": "Model files released for download, often with a permissive license. Different from \"open source\" which implies training code too.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "openai-agent-builder",
+    "term": "OpenAI Agent Builder",
+    "definition": "OpenAI's hosted offering for building agents via SDK or visual graph editor.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "otel",
+    "term": "OpenTelemetry",
+    "definition": "Open standard for tracing, metrics, logs.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "orchestrator-worker",
+    "term": "orchestrator-worker",
+    "definition": "Pattern: an orchestrator LLM plans subtasks at runtime, dispatches each to a worker LLM, and synthesizes the worker outputs.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "outbound-dry-run",
+    "term": "outbound dry-run",
+    "definition": "Agent produces all emails but does not create Gmail drafts until a human approves.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "output-validation",
+    "term": "output validation",
+    "definition": "Checking model output against an expected shape before passing it to UI, shell, or DB.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "pair-program-agent",
+    "term": "pair-program agent",
+    "definition": "Agent that works alongside a developer in real-time, suggesting and applying edits.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "parallel-tool-use",
+    "term": "parallel tool use",
+    "definition": "A single model response containing multiple tool_use blocks the harness should run concurrently.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "parallelization",
+    "term": "parallelization",
+    "definition": "Running multiple LLM calls concurrently and combining outputs. Two flavors: sectioning (different chunks) and voting (same prompt, multiple runs).",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "partial-json",
+    "term": "partial JSON",
+    "definition": "Truncated JSON output, usually from hitting max_tokens mid-generation.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "per-token-pricing",
+    "term": "per-token pricing",
+    "definition": "Provider charges per million tokens, separated into input and output.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "permission-allowlist",
+    "term": "permission allowlist",
+    "definition": "Tools auto-approved for execution without prompting the user.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "permission-gate",
+    "term": "permission gate",
+    "definition": "The check the harness runs before executing a tool, asking the user if needed.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "permissions-allowlist",
+    "term": "permissions allowlist",
+    "definition": "List of pre-approved tool calls the harness can run without asking.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "persona",
+    "term": "persona",
+    "definition": "The role assigned in the system prompt. Frames register, vocabulary, and judgement defaults. Bad for hard rules; good for tone.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "persona-drift",
+    "term": "persona drift",
+    "definition": "Voice drifts across a batch as prompt context changes. Mitigated by system prompt caching and stable few-shots.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "persona-matched",
+    "term": "persona-matched",
+    "definition": "Email generation tuned to a specific user's voice via system prompt and few-shot examples.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "pii",
+    "term": "PII",
+    "definition": "Personally identifiable information. Detect, redact, never log raw.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "plan-mode",
+    "term": "plan mode",
+    "definition": "Mode where the agent writes a plan but does not execute changes.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "plan-then-execute",
+    "term": "plan-then-execute",
+    "definition": "Asking the model to describe its plan before issuing tool calls.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "playwright",
+    "term": "Playwright",
+    "definition": "Microsoft's browser automation library. Substrate for most agent browser tools.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "plugin",
+    "term": "plugin",
+    "definition": "A bundle of skills, hooks, and tools that extend a harness.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "plugin-cc",
+    "term": "plugin",
+    "definition": "Bundle of skills, hooks, slash commands, and tools distributed as a directory.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "post-tool-use",
+    "term": "PostToolUse",
+    "definition": "Hook event firing after a tool call returns. Receives the result.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "pre-flight",
+    "term": "pre-flight check",
+    "definition": "Validation pass before any external write to catch bad subject lines, banned phrases, or body shape errors.",
+    "moduleId": "m22",
+    "moduleNum": "22",
+    "moduleTitle": "GTM agent: personalized cold email drafter",
+    "moduleSlug": "gtm-agent-1"
+  },
+  {
+    "id": "prefill",
+    "term": "prefill",
+    "definition": "The phase where input tokens are processed in a batch before generation starts. Dominates TTFT on long inputs.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "pre-tool-use",
+    "term": "PreToolUse",
+    "definition": "Hook event firing before a tool call executes. Can deny.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "production-sampling",
+    "term": "production sampling",
+    "definition": "Running judge prompts against a fraction of real traffic for ongoing eval.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "prompt-caching",
+    "term": "prompt caching",
+    "definition": "Optimization that lets the API cache the prefix of repeated requests, charging much less for cached portions.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "prompt-chaining",
+    "term": "prompt chaining",
+    "definition": "Workflow pattern: decompose a task into ordered LLM calls, each one a smaller, more focused job than the original.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "prompt-injection",
+    "term": "prompt injection",
+    "definition": "Adversarial input embedded in a tool result, document, or message that tries to override the system prompt. Treat tool output as data, not instructions. Module 12 covers defenses.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "prompt-injection",
+    "term": "prompt injection",
+    "definition": "An attack that smuggles instructions into the model's context through user input or fetched data.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "promptfoo",
+    "term": "promptfoo",
+    "definition": "Open-source eval framework for prompts and agents.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "provider-fallback",
+    "term": "provider fallback",
+    "definition": "Routing a request to a secondary provider when the primary fails or rate-limits.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "provider-lock-in",
+    "term": "provider lock-in",
+    "definition": "The cost of switching the underlying model provider once you have built on a platform.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "proxycurl",
+    "term": "Proxycurl",
+    "definition": "LinkedIn data provider used as Potter's primary research source.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "pydantic",
+    "term": "Pydantic",
+    "definition": "Python equivalent of Zod, popular in agent frameworks.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "qlora",
+    "term": "QLoRA",
+    "definition": "LoRA on a quantized base model. Even cheaper.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "quantization",
+    "term": "quantization",
+    "definition": "Reducing model precision (fp16 to int8 to int4) to fit smaller hardware, with quality trade-off.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "queue",
+    "term": "queue",
+    "definition": "Event store decoupling producers and consumers; events trigger agent runs.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "qwen-family",
+    "term": "Qwen family",
+    "definition": "Alibaba's open-weights model line. Strong on code and multilingual.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "rag",
+    "term": "RAG",
+    "definition": "Retrieval-Augmented Generation. The pattern of retrieving relevant documents and injecting them into the prompt.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "react",
+    "term": "ReAct",
+    "definition": "Reasoning and acting interleaved. Pattern from Yao et al. (arXiv 2022, ICLR 2023): Thought, Action, Observation, repeat. Modern Claude tool-use is ReAct natively.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "realtime-api",
+    "term": "Realtime API",
+    "definition": "OpenAI's audio-in audio-out streaming API with function calling. GA since August 2025; WebRTC for browser/mobile, WebSocket for server-to-server.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "reasoning-model",
+    "term": "reasoning model",
+    "definition": "Models that emit hidden chain-of-thought before the user-visible answer. Claude extended thinking, OpenAI o-series, Gemini Thinking.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "red-team-eval",
+    "term": "red-team eval",
+    "definition": "Adversarial inputs designed to trigger failures (injection, jailbreak, edge cases).",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "regression-test",
+    "term": "regression test",
+    "definition": "Re-running the eval suite against a new model version to catch drift.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "relevance-score",
+    "term": "relevance score",
+    "definition": "1-5 ranking of how well a company matches the ICP, with one-sentence rationale.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "replay",
+    "term": "replay",
+    "definition": "Re-running a failed agent run from persisted state to debug.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "reranking",
+    "term": "reranking",
+    "definition": "A second-pass scoring of retrieved candidates by a (often smaller) model.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "residential-proxy",
+    "term": "residential proxy",
+    "definition": "A proxy whose IP belongs to a real ISP, used to evade anti-bot blocks.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "response-format",
+    "term": "response_format",
+    "definition": "API parameter that takes a schema and constrains the response to match.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "retell",
+    "term": "Retell",
+    "definition": "Managed voice agent platform, phone-first focus.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "routing",
+    "term": "routing",
+    "definition": "Workflow pattern: classify the input and dispatch to one of N specialized downstream paths.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "rubric",
+    "term": "rubric",
+    "definition": "Structured scoring criteria for the judge prompt.",
+    "moduleId": "m16",
+    "moduleNum": "16",
+    "moduleTitle": "Evaluation and testing",
+    "moduleSlug": "evaluation"
+  },
+  {
+    "id": "run-id",
+    "term": "run_id",
+    "definition": "Correlation identifier shared by all events from a single agent run.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "sandbox-security",
+    "term": "sandbox (security)",
+    "definition": "Isolation environment for executing tool code. Container per call, network deny by default.",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "schema",
+    "term": "schema",
+    "definition": "The JSON Schema describing a tool's input arguments and types.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "schema-output",
+    "term": "schema",
+    "definition": "The contract describing the shape and types of a structured response.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "schema-validation",
+    "term": "schema validation",
+    "definition": "Checking that a parsed object matches the expected shape and types.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "sdk",
+    "term": "SDK",
+    "definition": "Typed library wrapping the HTTP API in your language of choice. Anthropic SDK in TypeScript and Python.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "sectioning",
+    "term": "sectioning",
+    "definition": "Parallelization variant: split the input into independent chunks, run each in parallel, combine the results.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "selector",
+    "term": "selector",
+    "definition": "A query (CSS, XPath, role+text) identifying which element to interact with.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "selector-flake",
+    "term": "selector flake",
+    "definition": "Specific case where a selector works once and fails the next due to dynamic class names or A/B tests.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "semantic-memory",
+    "term": "semantic memory",
+    "definition": "A knowledge base of facts or documents the agent retrieves from on demand.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "semantic-tool-search",
+    "term": "semantic tool search",
+    "definition": "Pre-filtering the tool catalog by relevance to the current query before showing the model.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "settings-layering",
+    "term": "settings layering",
+    "definition": "Override mechanism (global, project, local) for harness configuration.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "settings-json",
+    "term": "settings.json",
+    "definition": "Claude Code's configuration file. Layered: global, user, project, project-local.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "shadow-traffic",
+    "term": "shadow traffic",
+    "definition": "Sending a copy of production traffic to a new version without serving its responses.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "skill",
+    "term": "skill",
+    "definition": "Prompt-templated capability defined by a markdown file with frontmatter. The model decides when to invoke it.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "slash-command",
+    "term": "slash command",
+    "definition": "User-typed shortcut that expands to a templated prompt.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "slo",
+    "term": "SLO",
+    "definition": "Service Level Objective. The target reliability metric (e.g. 99% of requests under 2s).",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "trace-span",
+    "term": "span (trace)",
+    "definition": "A unit of work with start/end timestamps, used for distributed tracing.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "spec-discipline",
+    "term": "spec discipline",
+    "definition": "The practice of writing the spec first, locking acceptance, then implementing.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "spec-driven-coding",
+    "term": "spec-driven coding",
+    "definition": "Workflow where the spec is written first and the agent implements against it.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "spend-cap",
+    "term": "spend cap",
+    "definition": "Per-user or per-feature limit that prevents runaway cost.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "sse",
+    "term": "SSE",
+    "definition": "Server-Sent Events. The streaming format the API uses to deliver tokens incrementally.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "sse-transport",
+    "term": "SSE transport",
+    "definition": "MCP over Server-Sent Events. Used by older hosted MCP servers.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "stagehand",
+    "term": "Stagehand",
+    "definition": "Browser automation library combining Playwright primitives with LLM-driven act() mode.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "stagehand-integration",
+    "term": "Stagehand integration",
+    "definition": "How Potter wraps Stagehand for browser automation inside potter_browser_act.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "stateless-api",
+    "term": "stateless API",
+    "definition": "An HTTP API where the server does not persist any state about clients between requests. Anthropic's /v1/messages is stateless.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "stdio-transport",
+    "term": "stdio transport",
+    "definition": "MCP over stdin and stdout pipes. Used by local server processes.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "step",
+    "term": "step",
+    "definition": "A unit of durable execution; runs once and persists its result for replay.",
+    "moduleId": "m15",
+    "moduleNum": "15",
+    "moduleTitle": "Background and async agents",
+    "moduleSlug": "async-agents"
+  },
+  {
+    "id": "stop-reason",
+    "term": "stop_reason",
+    "definition": "Field on every API response telling you why generation stopped. Drives the agentic loop's control flow.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "streamable-http",
+    "term": "streamable HTTP",
+    "definition": "A newer MCP transport using HTTP with chunked responses. The default for new hosted servers.",
+    "moduleId": "m06",
+    "moduleNum": "06",
+    "moduleTitle": "API · SDK · CLI · MCP",
+    "moduleSlug": "api-sdk-cli-mcp"
+  },
+  {
+    "id": "structured-error",
+    "term": "structured error",
+    "definition": "An error response shaped as JSON the model can introspect, not a free-text string.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "structured-event",
+    "term": "structured event",
+    "definition": "A log line with explicit fields (run_id, tool_name, status), not a free-text message.",
+    "moduleId": "m19",
+    "moduleNum": "19",
+    "moduleTitle": "Observability and deployment",
+    "moduleSlug": "observability"
+  },
+  {
+    "id": "structured-output",
+    "term": "structured output",
+    "definition": "A model response constrained to a parseable shape (JSON object, typed fields).",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  },
+  {
+    "id": "subagent",
+    "term": "subagent",
+    "definition": "A child agent loop launched by the parent. Has its own context window and tools, returns a single result, does not see parent context.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "subagent",
+    "term": "subagent",
+    "definition": "A scoped agent the main loop spawns to do a sub-task with its own context.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "subagent-cc",
+    "term": "subagent",
+    "definition": "A scoped agent the main loop spawns with its own context, tool set, and system prompt.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "suggested-question",
+    "term": "suggested question",
+    "definition": "Open-ended question the agent recommends asking, tied to the attendee's recent activity.",
+    "moduleId": "m24",
+    "moduleNum": "24",
+    "moduleTitle": "GTM agent: meeting prep",
+    "moduleSlug": "gtm-agent-3"
+  },
+  {
+    "id": "swe-bench",
+    "term": "SWE-bench",
+    "definition": "Public benchmark for coding agents using real GitHub issues.",
+    "moduleId": "m21",
+    "moduleNum": "21",
+    "moduleTitle": "Coding agents in depth",
+    "moduleSlug": "coding-agents"
+  },
+  {
+    "id": "system-prompt",
+    "term": "system prompt",
+    "definition": "The durable instruction layer sent on every turn of the loop. Lives in the top-level system field, separate from the messages array.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "tcpa",
+    "term": "TCPA",
+    "definition": "US regulation governing automated calls and texts. Affects outbound voice agents.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "temperature",
+    "term": "temperature",
+    "definition": "Sampling parameter. 0 means deterministic-ish, higher means more variety in output.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "temperature",
+    "term": "temperature",
+    "definition": "Sampling parameter that scales the next-token probability distribution. Default 1.0, range 0.0 to 1.0. Disabled on Claude Opus 4.7 (omit the parameter; steer behavior via prompting).",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "thinking-block",
+    "term": "thinking block",
+    "definition": "Content block type holding reasoning the model did before answering. Billed and counted toward latency; harness chooses whether to render.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "three-runtime",
+    "term": "three-runtime pattern",
+    "definition": "Shipping the same core under three deployment wrappers (MCP, batch, CLI) for different consumption shapes.",
+    "moduleId": "m25",
+    "moduleNum": "25",
+    "moduleTitle": "Potter case study",
+    "moduleSlug": "potter-case-study"
+  },
+  {
+    "id": "throughput",
+    "term": "throughput",
+    "definition": "Tokens per second during decoding. Independent of how long the input is.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "token",
+    "term": "token",
+    "definition": "Sub-word fragment the model operates on. Roughly four characters of English per token.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "token-forecast",
+    "term": "token forecast",
+    "definition": "Predicted monthly token consumption from product metrics.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "tool-catalog",
+    "term": "tool catalog",
+    "definition": "The complete set of tools available to an agent in a session.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "tool-description-as-prompt",
+    "term": "tool description as prompt",
+    "definition": "The principle that tool descriptions are read by the model as part of the prompt and should be written with the same care as instructions, including disambiguating examples.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "tool-gating",
+    "term": "tool gating",
+    "definition": "Per-tool execution policy (auto, confirm, deny) by user or context.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "tool-grain",
+    "term": "tool grain",
+    "definition": "The abstraction level of a browser tool (low-level click_x_y vs high-level purchase_product).",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "tool-registry",
+    "term": "tool registry",
+    "definition": "Where the harness keeps the available tools the model can invoke.",
+    "moduleId": "m07",
+    "moduleNum": "07",
+    "moduleTitle": "Harnesses",
+    "moduleSlug": "harnesses"
+  },
+  {
+    "id": "tool-versioning",
+    "term": "tool versioning",
+    "definition": "Maintaining v1 and v2 of a tool so existing prompts and new prompts can both work.",
+    "moduleId": "m10",
+    "moduleNum": "10",
+    "moduleTitle": "Tool design at scale",
+    "moduleSlug": "tool-design"
+  },
+  {
+    "id": "tool-blocks",
+    "term": "tool_use / tool_result",
+    "definition": "Content blocks. tool_use is the model asking to run a function; tool_result is your response with the output.",
+    "moduleId": "m01",
+    "moduleNum": "01",
+    "moduleTitle": "Primitives",
+    "moduleSlug": "primitives"
+  },
+  {
+    "id": "top-p",
+    "term": "top_p",
+    "definition": "Nucleus sampling. Only consider tokens whose cumulative probability reaches p, then sample from that nucleus. Anthropic recommends it only for advanced cases.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "top-k",
+    "term": "top-k",
+    "definition": "Sampling rule that only considers the k highest-probability tokens. Hard cutoff regardless of the distribution shape.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "top-p",
+    "term": "top-p (nucleus)",
+    "definition": "Sampling rule that only considers tokens whose cumulative probability reaches p. Adapts to the shape of the distribution.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "trust-label",
+    "term": "trust label",
+    "definition": "Marker on input data indicating its source's trust level (trusted, untrusted, hostile).",
+    "moduleId": "m18",
+    "moduleNum": "18",
+    "moduleTitle": "Security and adversarial",
+    "moduleSlug": "security-adversarial"
+  },
+  {
+    "id": "ttft",
+    "term": "TTFT",
+    "definition": "Time to first token. The wall time between request submission and the first generated token arriving.",
+    "moduleId": "m02",
+    "moduleNum": "02",
+    "moduleTitle": "Inference",
+    "moduleSlug": "inference"
+  },
+  {
+    "id": "ttft-voice",
+    "term": "TTFT (voice)",
+    "definition": "Time to first audible token. The wall time between user finishing and agent's first sound.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "tts",
+    "term": "TTS",
+    "definition": "Text-to-speech. Text in, audio out. ElevenLabs, OpenAI TTS, many open-source options.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "tts-voice",
+    "term": "TTS",
+    "definition": "Text-to-speech. Text in, audio out. ElevenLabs, OpenAI TTS, Cartesia.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "user-prompt-submit",
+    "term": "UserPromptSubmit",
+    "definition": "Hook event firing when the user submits a prompt. Receives the prompt, can mutate or block.",
+    "moduleId": "m08",
+    "moduleNum": "08",
+    "moduleTitle": "Claude Code extension surface",
+    "moduleSlug": "claude-code-surface"
+  },
+  {
+    "id": "vad",
+    "term": "VAD",
+    "definition": "Voice activity detection. Determines when the user is speaking versus silent.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "vapi",
+    "term": "Vapi",
+    "definition": "Managed voice agent platform orchestrating ASR + LLM + TTS via API.",
+    "moduleId": "m14",
+    "moduleNum": "14",
+    "moduleTitle": "Voice and realtime agents",
+    "moduleSlug": "voice-realtime"
+  },
+  {
+    "id": "vector-store",
+    "term": "vector store",
+    "definition": "A database optimized for similarity search over embeddings.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "vercel-ai-sdk",
+    "term": "Vercel AI SDK",
+    "definition": "Provider-agnostic TypeScript SDK with streaming-first React helpers.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "vision-in",
+    "term": "vision-in",
+    "definition": "A model accepting images as input and returning text. The most common multimodal pattern in production.",
+    "moduleId": "m05",
+    "moduleNum": "05",
+    "moduleTitle": "Multimodal and reasoning models",
+    "moduleSlug": "multimodal"
+  },
+  {
+    "id": "visual-builder",
+    "term": "visual builder",
+    "definition": "A graph-style UI for composing agents, nodes connected by edges.",
+    "moduleId": "m09",
+    "moduleNum": "09",
+    "moduleTitle": "Managed agent platforms",
+    "moduleSlug": "managed-platforms"
+  },
+  {
+    "id": "visual-feedback",
+    "term": "visual feedback",
+    "definition": "Sending screenshots back to the model so it can \"see\" the current page state.",
+    "moduleId": "m13",
+    "moduleNum": "13",
+    "moduleTitle": "Browser and web automation",
+    "moduleSlug": "browser-automation"
+  },
+  {
+    "id": "vllm",
+    "term": "vLLM",
+    "definition": "High-throughput inference server for hosted serving.",
+    "moduleId": "m20",
+    "moduleNum": "20",
+    "moduleTitle": "Open source models and Hugging Face",
+    "moduleSlug": "open-source-models"
+  },
+  {
+    "id": "voting",
+    "term": "voting",
+    "definition": "Parallelization variant: run the same prompt N times to get diverse outputs, then aggregate (majority vote, average, ensemble). The aggregation step reduces variance. Does not help with structural blind spots.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "weekly-digest",
+    "term": "weekly digest",
+    "definition": "The Monday Slack message containing the ranked list of qualified raises.",
+    "moduleId": "m23",
+    "moduleNum": "23",
+    "moduleTitle": "GTM agent: weekly funding monitor",
+    "moduleSlug": "gtm-agent-2"
+  },
+  {
+    "id": "workflow",
+    "term": "workflow",
+    "definition": "A system where LLMs and tools are orchestrated through predefined code paths. Your code holds the script.",
+    "moduleId": "m03",
+    "moduleNum": "03",
+    "moduleTitle": "Agent patterns",
+    "moduleSlug": "agent-patterns"
+  },
+  {
+    "id": "working-memory",
+    "term": "working memory",
+    "definition": "The current conversation's context. Lives in the messages array of one session.",
+    "moduleId": "m11",
+    "moduleNum": "11",
+    "moduleTitle": "Memory and retrieval",
+    "moduleSlug": "memory-retrieval"
+  },
+  {
+    "id": "wrapper-margin",
+    "term": "wrapper margin",
+    "definition": "The thin profit margin LLM-wrapper startups operate on.",
+    "moduleId": "m17",
+    "moduleNum": "17",
+    "moduleTitle": "Cost economics",
+    "moduleSlug": "cost-economics"
+  },
+  {
+    "id": "zero-shot",
+    "term": "zero-shot",
+    "definition": "No examples in the prompt, only instructions. The default for most agent prompts on capable models.",
+    "moduleId": "m04",
+    "moduleNum": "04",
+    "moduleTitle": "Prompt engineering for agents",
+    "moduleSlug": "prompt-engineering"
+  },
+  {
+    "id": "zod",
+    "term": "Zod",
+    "definition": "TypeScript schema library used to validate parsed objects on the client side.",
+    "moduleId": "m12",
+    "moduleNum": "12",
+    "moduleTitle": "Structured output",
+    "moduleSlug": "structured-output"
+  }
+]
