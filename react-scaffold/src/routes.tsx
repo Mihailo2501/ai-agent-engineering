@@ -1,5 +1,6 @@
 import { createBrowserRouter } from 'react-router';
 import { App } from './app';
+import { GlossaryPage } from './pages/glossary';
 import { HomePage } from './pages/home';
 import { ModulePage } from './pages/module';
 import { NotFoundPage } from './pages/not-found';
@@ -13,6 +14,7 @@ export const router = createBrowserRouter([
     Component: App,
     children: [
       { index: true, Component: HomePage },
+      { path: 'glossary', Component: GlossaryPage },
       { path: 'm/:slug', Component: ModulePage },
       { path: '*', Component: NotFoundPage }
     ]

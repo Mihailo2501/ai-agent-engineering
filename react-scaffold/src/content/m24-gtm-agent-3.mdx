@@ -1,0 +1,404 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  WebhookLifecycleStepper,
+  BriefBrowserDemo,
+  testExtractExternalAttendees,
+  testComposeBrief,
+  testScheduleDelivery
+} from './m24-gtm-agent-3';
+
+<ModuleHero
+  kicker="Module 24 · GTM agent: meeting prep"
+  title="A friend who briefs you on the way to the call"
+  lead="A great salesperson spends an hour before each meeting researching the room. An agent can do that in 30 seconds, deliver the brief 30 minutes before the meeting starts, and leave the salesperson reading on the way to the call. This is the third agent."
+  trackId="applied"
+  moduleId="m24"
+/>
+
+<Toc items={[
+  { href: '#what-it-does', label: 'What this agent does and why' },
+  { href: '#user-story', label: 'The user story' },
+  { href: '#trigger', label: 'Trigger architecture: webhook vs polling' },
+  { href: '#tools', label: 'Tool layer' },
+  { href: '#loop', label: 'Building the loop' },
+  { href: '#brief', label: 'Brief composition' },
+  { href: '#pii', label: 'PII handling' },
+  { href: '#eval', label: 'Eval' },
+  { href: '#deploy', label: 'Deployment' },
+  { href: '#what-broke', label: 'Iteration log: what broke' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-it-does" num={1} title="What this agent does and why">
+
+A <GLink slug="calendar-webhook">calendar webhook</GLink> fires when a new event lands. The agent parses external attendees, researches each via Potter, and assembles a one-page brief: who they are, what their company is doing, recent posts and news, conversation hooks, suggested questions. Brief delivered to a Slack DM 30 minutes before the meeting starts.
+
+The shape that survives:
+
+- Calendly webhook (or Google Calendar push notification) fires the workflow.
+- Inngest receives the event, dedupes by event id, persists the request.
+- External attendees parsed; internal-domain emails filtered out.
+- Per-attendee Potter research fans out in parallel.
+- Brief composed with structured output ([Module 12](/m/structured-output#tool-extract)).
+- Delivery scheduled at meeting_start minus 30 minutes via Inngest's durable sleep.
+- Slack DM lands at the scheduled time; user reads on the way to the call.
+
+This is universal GTM utility. It works for sales calls, partnership meetings, intro coffees, hiring screens, podcast interviews. Any meeting with at least one external attendee benefits from a short, specific brief.
+
+</Section>
+
+<Section id="user-story" num={2} title="The user story">
+
+Someone books a 30-minute call via Calendly. Thirty minutes before the call, the user gets a Slack DM titled "Meeting prep · Alex from Acme @ 15:00". Inside:
+
+- Who Alex is: Head of Growth at Acme since 2024, prior at Stripe.
+- Company status: Series A in March, hiring three product engineers, recently shipped a video personalization feature.
+- Two recent LinkedIn posts: one about Remotion, one about evaluating the build vs buy decision for a video pipeline.
+- Conversation hooks: "Saw your team shipped X last week" and "Remotion post resonated with our GTM Movie work".
+- Three suggested questions, each tied to the research: "What was the Remotion deciding factor?" "How is the team thinking about the personalization-vs-scale trade-off?" "Where is the priority shape for the new product engineers?"
+
+The user reads the brief on the way to the call. Five minutes of reading replaces an hour of pre-meeting prep. The conversation opens warmer and lands faster because the user shows up with specific context.
+
+</Section>
+
+<Section id="trigger" num={3} title="Trigger architecture: webhook vs polling">
+
+Two trigger shapes:
+
+- **Webhook (preferred).** Calendly fires on event creation; the agent reacts immediately. Lower latency, lower API cost, no polling overhead. Calendly, Cal.com, Savvycal all support this.
+- **Polling.** Google Calendar requires push notifications setup (more involved) or polling. If neither is feasible, cron every 15 minutes to fetch events ≥ 30 minutes away that have not been processed. Inefficient compared to webhooks but works as a fallback.
+
+The decision rule: webhook when the source supports it; cron polling when it does not. Pick the lower-latency path; the user experience hinges on the brief landing exactly 30 minutes before the meeting, not "sometime in the next 30 to 45 minutes".
+
+<Mermaid chart={`flowchart LR
+  C["Calendly / Cal.com<br/>webhook"] --> ING["Inngest<br/>event handler"]
+  ING --> EXT["filter external<br/>attendees"]
+  EXT --> RES["parallel Potter<br/>research"]
+  RES --> BRIEF["compose brief<br/>(tool-use extraction)"]
+  BRIEF --> SLEEP["step.sleepUntil<br/>meeting_start - 30m"]
+  SLEEP --> DM["Slack DM"]`} />
+
+</Section>
+
+<Section id="tools" num={4} title="Tool layer">
+
+The tools the loop touches:
+
+- **Calendar source.** Calendly webhook payload, Cal.com webhook, or Google Calendar push notification. Provides organizer, attendees, event start time, calendar timezone.
+- **Potter MCP.** Per attendee: `potter_research_person`, `potter_research_company`, `potter_summarize_linkedin_posts`, `potter_web_search` for last-week coverage. Per meeting that is 12 to 24 Potter calls across 3 to 6 attendees.
+- **Slack API.** DM delivery via `chat.postMessage` with a stable user id. Optional: `chat.delete` after 24 hours for ephemeral delivery.
+- **Inngest.** Event ingest, durable workflow, `step.sleepUntil` for the timed delivery, retry on failure.
+
+PII boundary: attendee emails are PII; redact in logs. Brief content is delivered to a DM (not a channel), reducing accidental exposure.
+
+### Sandbox · Filter external attendees
+
+<Sandbox
+  id="m24-extract-external-attendees"
+  mode="js"
+  prompt={<>Implement <code>extractExternalAttendees(event, internalDomains)</code>. Input: <code>event</code> with <code>attendees</code> (array of <code>{`{ email, name }`}</code>) and <code>organizer</code> (<code>{`{ email }`}</code>). <code>internalDomains</code> is an array of strings. Return only attendees whose email domain is not in <code>internalDomains</code>. Skip the organizer. Domain comparison is case-insensitive.</>}
+  starter={`function extractExternalAttendees(event, internalDomains) {
+  // your code here
+}
+
+return extractExternalAttendees;`}
+  test={testExtractExternalAttendees}
+  hint={<>Lowercase the internal domains and the per-attendee domain (split on "@"). Filter out the organizer email and any attendee whose domain is in the internal set.</>}
+/>
+
+</Section>
+
+<Section id="loop" num={5} title="Building the loop">
+
+A 100-line sketch in Inngest TypeScript:
+
+<CodeBlock lang="ts">{`import { Inngest } from 'inngest';
+import Anthropic from '@anthropic-ai/sdk';
+import { Client as MCPClient } from '@modelcontextprotocol/sdk/client';
+import { postSlackDM } from './slack';
+
+const inngest = new Inngest({ id: 'meeting-prep' });
+const claude = new Anthropic();
+const potter = await MCPClient.fromCommand('npx potter-mcp');
+
+const INTERNAL_DOMAINS = (process.env.INTERNAL_DOMAINS || '').split(',').map((s) => s.toLowerCase());
+
+export const meetingPrep = inngest.createFunction(
+  { id: 'meeting-prep' },
+  { event: 'calendar/event.created' },
+  async ({ event, step }) => {
+    const externals = await step.run('filter-attendees', () =>
+      extractExternalAttendees(event.data, INTERNAL_DOMAINS)
+    );
+
+    if (externals.length === 0) return { skipped: 'all-internal' };
+
+    const briefs = await step.run('research-and-compose', () =>
+      Promise.all(
+        externals.map(async (att) => {
+          const [person, company, posts, news] = await Promise.all([
+            potter.callTool({ name: 'potter_research_person', arguments: { email: att.email } }),
+            potter.callTool({ name: 'potter_research_company', arguments: { domain: att.email.split('@')[1] } }),
+            potter.callTool({ name: 'potter_summarize_linkedin_posts', arguments: { email: att.email } }),
+            potter.callTool({ name: 'potter_web_search', arguments: { q: att.email.split('@')[1] + ' news', recency_days: 14 } })
+          ]);
+          return composeBrief(claude, { person, company, posts, news });
+        })
+      )
+    );
+
+    const deliveryAt = scheduleDeliveryAt(event.data.start, 30);
+    await step.sleepUntil('await-meeting-time', deliveryAt);
+
+    await step.run('deliver-slack-dm', () =>
+      postSlackDM({
+        userId: process.env.SLACK_USER_ID!,
+        body: formatBriefAsSlack(briefs, event.data)
+      })
+    );
+
+    return { delivered: true, attendees: externals.length };
+  }
+);`}</CodeBlock>
+
+<WebhookLifecycleStepper />
+
+</Section>
+
+<Section id="brief" num={6} title="Brief composition: structured output">
+
+[Module 12](/m/structured-output) tool-use extraction applied. The schema:
+
+<CodeBlock lang="ts">{`interface MeetingBrief {
+  attendee_name: string;
+  role: string;
+  company_name: string;
+  company_status: string;          // 2-3 sentences on what the company is up to
+  recent_posts: string[];           // summarized, not raw
+  recent_news: string[];            // headlines from last 7-14 days
+  conversation_hooks: string[];     // specific things worth mentioning
+  suggested_questions: string[];    // 3 to 5 open-ended, research-grounded
+}`}</CodeBlock>
+
+The agent calls a `submit_meeting_brief` tool with that exact shape; `tool_choice` forces the call; the result is a typed object the rest of the pipeline consumes.
+
+<BriefBrowserDemo />
+
+The tone matters. The system prompt for this composition step explicitly steers toward "what your friend would tell you on the way to the call" rather than dossier-style enumeration. Specific facts; conversation hooks; opinions where they help. Generic recap of "they are a B2B SaaS company at Series A" is the failure mode.
+
+### Sandbox · Compose the brief with tool use
+
+<Sandbox
+  id="m24-compose-brief"
+  mode="anthropic"
+  prompt={<>Use <code>claude(opts)</code> with a <code>submit_meeting_brief</code> tool whose schema includes attendee_name, role, company_name, company_status, recent_posts (array), recent_news (array), conversation_hooks (array, non-empty), suggested_questions (array of 3 to 5). Force the model to call the tool. Parse the tool_use input and return it. The system prompt should constrain to specific, research-grounded questions (no generic "what brings you here today").</>}
+  starter={`const research = {
+  attendee: { name: 'Alex Doe', role: 'Head of Growth', email: 'alex@acme.com' },
+  company: { name: 'Acme', stage: 'Series A', recent_news: 'Hiring three product engineers' },
+  recent_posts: [
+    'Posted about Remotion as the rendering engine for their video personalization stack.',
+    'Asked the network for advice on the build vs buy decision for video pipelines.'
+  ]
+};
+
+const tools = [{
+  name: 'submit_meeting_brief',
+  description: 'Submit the structured meeting brief. Use this exactly once after considering the research blob.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      attendee_name: { type: 'string' },
+      role: { type: 'string' },
+      company_name: { type: 'string' },
+      company_status: { type: 'string', description: '2-3 sentences on what the company is up to' },
+      recent_posts: { type: 'array', items: { type: 'string' } },
+      recent_news: { type: 'array', items: { type: 'string' } },
+      conversation_hooks: { type: 'array', items: { type: 'string' }, description: 'Specific facts worth mentioning. Non-empty.' },
+      suggested_questions: {
+        type: 'array',
+        items: { type: 'string' },
+        description: '3 to 5 specific open-ended questions tied to the research. No generic openers.',
+        minItems: 3,
+        maxItems: 5
+      }
+    },
+    required: ['attendee_name', 'role', 'company_name', 'company_status', 'conversation_hooks', 'suggested_questions']
+  }
+}];
+
+const response = await claude({
+  system: 'You write concise meeting briefs. Tone: what a friend would tell you on the way to the call. Specific facts only; no generic recap. Suggested questions must reference something specific from the research.',
+  messages: [
+    { role: 'user', content: 'Compose a meeting brief from this research:\\n' + JSON.stringify(research) }
+  ],
+  tools,
+  tool_choice: { type: 'tool', name: 'submit_meeting_brief' },
+  max_tokens: 512
+});
+
+const block = /* find tool_use block */;
+return block.input;`}
+  test={testComposeBrief}
+  hint={<>Same pattern as Module 12: <code>response.content.find(b =&gt; b.type === "tool_use").input</code>. Make sure your suggested_questions are 3 to 5 items and not generic ("what brings you here today" auto-fails).</>}
+/>
+
+</Section>
+
+<Section id="pii" num={7} title="PII handling">
+
+[Module 18](/m/security-adversarial) applied to this specific case:
+
+- **Email addresses are PII.** Redact in logs. The audit trail records "agent processed N external attendees" with hashed identifiers, not raw emails.
+- **Brief delivered ephemerally.** Slack DM (not channel). Optional: brief auto-deletes 24 hours after meeting end via `chat.delete` to limit retention.
+- **Per-attendee research caching.** Cache results for 30 days keyed by hashed email. If an attendee was briefed recently, reuse with a freshness note ("research from 12 days ago").
+- **Internal domain list maintained explicitly.** Required in `INTERNAL_DOMAINS` env var. A bad list (forgetting a recently-acquired subsidiary's domain) would leak research about your own colleagues; the explicit list prevents it.
+- **No brief content in any error trace.** Log "compose-brief failed: missing required field X" without the brief content; structured errors stay PII-free.
+
+</Section>
+
+<Section id="eval" num={8} title="Eval: golden meetings test set">
+
+10 real past meetings with hand-written briefs. The salesperson wrote each brief manually before the meeting; the agent runs against the same inputs after the fact; LLM-as-judge scores the agent's brief against the human one on:
+
+- **Specificity.** Does it reference concrete facts or generic patterns?
+- **Accuracy.** Are the facts right and current?
+- **Actionability.** Are the suggested questions usable in the moment, or do they require improvisation?
+- **Tone.** Does it read like a friend's brief or a dossier?
+
+Aggregate to a 1-5 score per dimension; surface a final score that is the minimum (a perfect specificity score does not save a brief that scores 2 on accuracy). Threshold: median across all 10 cases stays above 4.
+
+The eval also catches:
+
+- LinkedIn rate-limit fallbacks (when Potter falls back to cached data, briefs lose freshness; the eval score drops; the alarm fires).
+- Tone drift after a system prompt edit.
+- Missing internal-domain entries (when an "external" attendee is actually your own colleague, the brief is awkward; the eval surface flags such cases).
+
+</Section>
+
+<Section id="deploy" num={9} title="Deployment">
+
+The deployment shape:
+
+- **Inngest** for the webhook handler, durable workflow, and `step.sleepUntil` for the timed delivery. Or Cloudflare Workers + Durable Objects if you want true edge with similar guarantees.
+- **Webhook endpoint** behind HTTPS, validated against Calendly's signing secret to reject forged payloads.
+- **Slack DM** via webhook URL. Per-user webhook URLs make multi-user deployment easy.
+- **Failure handling.** Retries with backoff ([Module 15](/m/async-agents)). Persistent failure escalates to a fallback DM: "I could not research X for the meeting at Y. Reason: Z." Better than silent failure.
+- **Time zone alignment.** Always send in the meeting's local time (parsed from the event payload), not the user's. A user with international meetings gets a brief that lands relative to the meeting, not relative to where they happen to be.
+
+### Sandbox · Schedule the delivery
+
+<Sandbox
+  id="m24-schedule-delivery"
+  mode="js"
+  prompt={<>Implement <code>scheduleDeliveryAt(meetingStart, leadMinutes)</code> returning the ISO timestamp <code>leadMinutes</code> before <code>meetingStart</code>. Default <code>leadMinutes</code> is 30. Input may be a UTC ISO string ("2026-05-01T15:00:00.000Z") or a TZ-aware ISO string ("2026-05-01T17:00:00+02:00"); output is a UTC ISO string.</>}
+  starter={`function scheduleDeliveryAt(meetingStart, leadMinutes = 30) {
+  // your code here
+}
+
+return scheduleDeliveryAt;`}
+  test={testScheduleDelivery}
+  hint={<>Parse with <code>new Date(meetingStart)</code>; subtract <code>leadMinutes * 60_000</code> ms; return <code>new Date(...).toISOString()</code>. Date parsing handles TZ-aware ISO inputs.</>}
+/>
+
+</Section>
+
+<Section id="what-broke" num={10} title="Iteration log: what broke">
+
+Real failure modes from building this:
+
+- **Filtering internal attendees by single domain.** Multi-domain orgs broke the heuristic; an "external" attendee was actually a colleague. Fix: maintain `INTERNAL_DOMAINS` as a list, including subsidiaries and recent acquisitions.
+- **LinkedIn rate limits during peak hours.** Mid-morning EU and afternoon US, Potter's Proxycurl backend would 429. Fix: cache attendee research for 30 days; on rate limit, fall back to cached data with a freshness annotation in the brief.
+- **Slack DM delivery timing across time zones.** The user travels; the user's Slack timezone updates; the meeting timezone does not. The brief was landing 30 minutes before the user's local time, not the meeting's. Fix: always compute in the meeting's TZ.
+- **Brief tone read like a dossier on first drafts.** "Alex Doe is the Head of Growth at Acme. Acme is a B2B SaaS company at Series A. Recent news indicates..." Fix: system prompt explicitly steered to "friend on the way to the call". Tone improved on the next batch.
+- **Webhook re-delivery created duplicate runs.** Calendly retries on transient failures; the agent processed the same event twice. Fix: dedupe by event id at ingest; same idempotency-key pattern as M22.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Heaviest Potter use of the three GTM agents</h3>
+
+    <p>Per attendee, the loop calls four Potter tools: <code>potter_research_person</code> (LinkedIn profile, role, tenure, recent activity), <code>potter_research_company</code> (firmographic, recent news, hiring), <code>potter_summarize_linkedin_posts</code> (last 5 posts for personality and topics), and <code>potter_web_search</code> (last-week coverage of the company). Per meeting that is 12 to 24 Potter calls across 3 to 6 attendees.</p>
+
+    <p>The cost shape: roughly $0.50 to $1.00 in provider fees per meeting plus about $0.10 in LLM (with caching). Marginal cost vs the salesperson's hour of pre-meeting prep is the trade. At a few dollars per meeting the math holds for any deal size that justifies a real meeting in the first place.</p>
+
+    <p>Without Potter, this agent re-implements four data integrations Mihailo already shipped plus a research orchestration layer. The split that holds across all three GTM agents: Potter is stateless data fetching; the harness is the agent loop, the timing, the delivery surface. Three different agents, one Potter.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-meeting-prep" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">meeting prep</p><p className="text-sm text-ink-700">The pre-meeting research a salesperson does manually; this agent automates it.</p></div>
+  <div id="glossary-calendar-webhook" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">calendar webhook</p><p className="text-sm text-ink-700">Push notification from a calendar service (Calendly, Google Calendar) on new event creation.</p></div>
+  <div id="glossary-external-attendee" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">external attendee</p><p className="text-sm text-ink-700">Meeting participant whose email domain is not in the user's internal-domain list.</p></div>
+  <div id="glossary-internal-domain" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">internal domain</p><p className="text-sm text-ink-700">Email domain belonging to the user's own organization. Used to filter attendees.</p></div>
+  <div id="glossary-brief-meeting" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">brief</p><p className="text-sm text-ink-700">Structured one-page document delivered to the user before the meeting.</p></div>
+  <div id="glossary-conversation-hook" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">conversation hook</p><p className="text-sm text-ink-700">A specific recent fact about the attendee or company worth mentioning in the meeting opening.</p></div>
+  <div id="glossary-suggested-question" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">suggested question</p><p className="text-sm text-ink-700">Open-ended question the agent recommends asking, tied to the attendee's recent activity.</p></div>
+  <div id="glossary-ephemeral-delivery" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ephemeral delivery</p><p className="text-sm text-ink-700">Brief delivered to a Slack DM (private) and optionally expiring 24h after the meeting.</p></div>
+  <div id="glossary-attendee-dedupe" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">attendee dedupe</p><p className="text-sm text-ink-700">Skip re-researching an attendee already briefed in the past 30 days. Use cached brief if recent.</p></div>
+  <div id="glossary-meeting-tz" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">meeting TZ alignment</p><p className="text-sm text-ink-700">Delivering the brief 30 min before meeting in the meeting's local time, not the user's.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m24-q1" question="1. Why webhook over polling for the trigger?">
+Lower latency and lower API cost. Polling every 15 minutes wastes calls when nothing changed and adds variance to the delivery time. Webhooks fire on event creation; the delivery time hinges on `step.sleepUntil`, not on polling cadence.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q2" question="2. How do you filter external attendees reliably?">
+Email domain check against an explicit `INTERNAL_DOMAINS` list. Multi-domain organizations need the list maintained explicitly. The single-domain heuristic breaks on subsidiaries, acquisitions, and personal email addresses on shared work calendars.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q3" question="3. Why deliver the brief 30 minutes before, not 5 minutes?">
+Salespeople need time to read and think on the way. Five minutes is not enough for the agent's signal to land. Thirty minutes lets the user pre-read, choose which hook to use, and arrive with rapport already shaped. Earlier than 30 minutes risks the brief getting lost in unrelated work; later risks no time to read.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q4" question="4. PII handling for attendee emails?">
+Redact in logs. Brief delivered to Slack DM (not channel). Optional: expire 24 hours after the meeting via Slack API delete. Cache attendee research keyed by hashed email, not raw email.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q5" question="5. Tone of the brief: dossier or briefing?">
+Friend-on-the-way-to-the-call briefing. Specific facts, conversation hooks, suggested questions, no recap of the obvious. The system prompt explicitly steers toward this tone; eval surfaces drift toward dossier-style.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q6" question="6. How do you avoid LinkedIn rate limits during peak hours?">
+Cache attendee research for 30 days keyed by hashed email. On rate limit, fall back to cached data with a freshness annotation in the brief ("research from 12 days ago"). Better than failing the brief entirely.
+</CheckQuestion>
+
+<CheckQuestion id="m24-q7" question="7. How does this agent compose with M22 and M23?">
+M22 books outreach meetings; those land in the calendar; M24 fires for them. M23 surfaces companies; resulting calls also get researched by M24. The three agents share state via Potter (research blobs reusable across agents) and via the brief schema (M23's brief feeds M22's hooks; M24's brief shows up before the meeting M22 booked).
+</CheckQuestion>
+
+<CheckQuestion id="m24-q8" question="8. Cost per meeting?">
+About $0.60 to $1.10. Mostly Potter providers (12 to 24 calls per meeting at provider rates); LLM is cheap with caching. Marginal cost vs the salesperson's hour saved is the trade; the math holds for any deal size that justifies a real meeting.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You shipped the meeting prep agent: webhook trigger, external-attendee filter, parallel Potter research, structured brief, scheduled Slack delivery 30 minutes before the call. The course closes with a deep look at the case study you have been hearing about for 24 modules.
+
+<CompleteBanner moduleId="m24" nextSlug="potter-case-study" nextTitle="Module 25 · Potter case study" />
+
+</Section>
+
+<ModuleNav prevSlug="gtm-agent-2" prevTitle="Module 23 · GTM agent: weekly funding monitor" nextSlug="potter-case-study" nextTitle="Module 25 · Potter case study" />

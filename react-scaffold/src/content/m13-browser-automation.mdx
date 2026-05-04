@@ -1,0 +1,350 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  StagehandModeDemo,
+  BrowserToolStepperDemo,
+  testPickToolGrain,
+  testPickSelector
+} from './m13-browser-automation';
+
+<ModuleHero
+  kicker="Module 13 · Browser and web automation"
+  title="The hardest tool an agent gets"
+  lead="Browser automation is the hardest tool an agent gets. The web is hostile, dynamic, anti-bot, and the model has to navigate visual layout it cannot directly see. Stagehand, Browserbase, Playwright: each makes different bets about how much of this the model decides versus the harness pre-bakes."
+  trackId="building"
+  moduleId="m13"
+/>
+
+<Toc items={[
+  { href: '#why-hard', label: 'Why browser automation is hard' },
+  { href: '#stagehand', label: 'Stagehand: primitives vs act' },
+  { href: '#browserbase', label: 'Browserbase: managed runtime' },
+  { href: '#playwright', label: 'Playwright as the substrate' },
+  { href: '#selectors', label: 'Selector strategy and the flake problem' },
+  { href: '#captchas', label: 'Captchas, Cloudflare, login walls' },
+  { href: '#screenshots', label: 'Visual feedback in the loop' },
+  { href: '#act-pattern', label: 'Tools that wrap dynamic UIs' },
+  { href: '#tool-grain', label: 'Designing browser tools an agent can drive' },
+  { href: '#failures', label: 'Failure modes and recovery' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="why-hard" num={1} title="Why browser automation is hard">
+
+A click is not just an action; it is a decision about which element. <GLink slug="selector">Selectors</GLink> break, captchas appear, login walls redirect. Every browser tool is a stack of trade-offs about reliability versus flexibility.
+
+Three properties make the web uniquely hostile to agents:
+
+- **The page is visual, the model is textual.** HTML is not what the user sees. Layouts shift; class names rotate; A/B tests change the DOM under your feet. The model that "reads" the page reads a flattened text that often does not reflect what is in front of a real visitor.
+- **The site is hostile.** Anti-bot tooling (Cloudflare, PerimeterX, Datadome) actively detects and blocks automation. Login walls. Rate limits. Captchas. None of this is a bug in the agent; it is the platform defending itself.
+- **State drifts between runs.** The same script that worked on Tuesday may fail on Wednesday because the site shipped a new design, or your IP is now in a rate-limit cooldown, or the user account hit a verification prompt.
+
+The patterns in this module are about treating the browser as the unreliable, hostile environment it actually is, and choosing the right grain of abstraction so the agent's decisions are as small as possible.
+
+<Mermaid chart={`flowchart LR
+  T["agent loop"] -->|tool_use| BR["browser tool runtime"]
+  BR --> PR["Playwright primitives<br/>click / fill / extract"]
+  BR --> ACT["Stagehand act()<br/>LLM-driven action"]
+  PR --> PG["target page"]
+  ACT --> PG
+  PG -->|may need| SS["screenshot back"]
+  SS --> ACT
+  PG --> RES["structured result"]
+  RES --> T`} />
+
+<p className="text-sm text-ink-500">A browser tool is a runtime that sits between the agent loop and the page. It chooses primitives by default and falls back to LLM-driven actions when needed.</p>
+
+</Section>
+
+<Section id="stagehand" num={2} title="The Stagehand model: primitives vs act mode">
+
+<GLink slug="stagehand">Stagehand</GLink> is Browserbase's open-source browser-automation framework. Stagehand v3 talks Chrome DevTools Protocol (CDP) directly rather than wrapping Playwright; Playwright integration is still available as an optional adapter when you want existing Playwright code to coexist. The shapes you actually use:
+
+- **<GLink slug="act-mode">act()</GLink>:** describe what you want in natural language, the model picks the selector and the action. `await page.act("click the Sign In button in the top right")`. Wins on novel pages and pages with rotating selectors.
+- **observe():** returns a list of candidate actions for a given description without executing. Useful for inspecting the model's plan or feeding it into your own selection logic.
+- **extract():** pulls structured data out of the current page using a Zod schema. Equivalent in spirit to the tool-use extraction pattern from [Module 12](/m/structured-output#tool-extract), but applied to live page content.
+- **agent():** multi-step model-driven workflow primitive added in v3. Hands the model a goal plus the current page state and lets it run several act/observe/extract steps until the goal is satisfied or a budget is hit.
+- **Deterministic primitives** for navigation, click, fill, scroll, screenshot, content extraction. Stable, no model call per action. The substrate underneath the model-driven primitives.
+
+<StagehandModeDemo />
+
+The decision rule that holds in production: primitives by default, act() as a fallback. A pure-act() agent is a beautiful demo and an expensive product. A pure-primitives agent is robust until the site changes, and then breaks until you ship a new selector. Mixing the two captures the cost win and the resilience win.
+
+A small example of the mix:
+
+<CodeBlock lang="ts">{`async function clickSignIn(page) {
+  try {
+    // Primitives first: cheap, deterministic, fast.
+    await page.getByRole('button', { name: /sign in/i }).click({ timeout: 3000 });
+  } catch (err) {
+    // Fall back to LLM-driven action when the role+text path fails.
+    await page.act("click the Sign In button");
+  }
+}`}</CodeBlock>
+
+</Section>
+
+<Section id="browserbase" num={3} title="Browserbase: managed browser runtime">
+
+<GLink slug="browserbase">Browserbase</GLink> is a hosted runtime for browsers. You hit an API; you get a browser session in the cloud. What it solves:
+
+- **Running browsers at scale without provisioning.** No Docker images, no headless Chrome flags, no GPU sizing. Open a session, run your script, close the session.
+- **Sessions and contexts.** Sessions persist cookies, localStorage, and authenticated state across calls. Contexts let you isolate one session from another (one session per user, or per task).
+- **<GLink slug="residential-proxy">Residential proxies</GLink>.** Rotates IPs through real ISPs to evade datacenter-IP blocks. Necessary for many anti-bot scenarios.
+- **<GLink slug="anti-detection">Anti-detection</GLink>.** Patches the headless browser's fingerprint (navigator properties, canvas, fonts) to look more like a real user.
+
+What it does not solve:
+
+- **Site logic that requires real accounts.** Browserbase runs the browser; the account credentials and the consequences of using them are still yours.
+- **Rate limits at the application layer.** A site can throttle you regardless of where the browser runs. Residential proxies help with IP-based limits, not application-level ones.
+
+What it now offers as part of Stealth Mode:
+
+- **Automatic CAPTCHA solving** for common challenge types (reCAPTCHA, hCAPTCHA, Cloudflare Turnstile). Coverage is uneven across sites and challenge variants; verify on your specific target before relying on it for production. The legal and ethical questions on the next page still apply.
+
+When to reach for Browserbase: when you need browsers in production at any non-trivial scale, when anti-bot detection is breaking your local Playwright, or when you want session persistence across a multi-step agent without managing the storage yourself. When to skip it: local prototyping, low-volume scraping where Playwright on your laptop is fine.
+
+</Section>
+
+<Section id="playwright" num={4} title="Playwright as the substrate">
+
+<GLink slug="playwright">Playwright</GLink> is Microsoft's browser automation library. It is the substrate underneath most agent browser tools: Browserbase exposes Playwright APIs over a hosted browser, many home-grown agent runtimes call Playwright directly, and Stagehand offers a Playwright integration when you want existing Playwright code to coexist with Stagehand's model-driven primitives.
+
+Why it dominates:
+
+- **Three browsers, one API.** Chromium, Firefox, WebKit, all driven by the same code.
+- **Auto-wait built in.** Most actions wait for the target element to be ready, reducing flake compared to older WebDriver-style frameworks.
+- **Strong locator semantics.** `getByRole`, `getByText`, `getByLabel` give you high-quality, accessibility-aligned selectors that are more stable than raw CSS.
+- **Trace and inspector tools.** When something breaks, the trace viewer shows exactly what the browser did, which selectors fired, which timed out.
+
+For agent work specifically, Playwright is the layer where deterministic action lives. Anything you can express as a Playwright primitive is cheaper, faster, and more reliable than asking the model to choose. The model's job is to decide which primitive to call, not to drive the browser directly.
+
+</Section>
+
+<Section id="selectors" num={5} title="Selector strategy and the flake problem">
+
+<GLink slug="flake">Flake</GLink> is when the same script works once and fails the next time for non-deterministic reasons. Selectors are the leading cause. A field guide:
+
+- **Best: `getByRole` + `getByText`.** Maps to the page's accessibility tree. Stable across class-name churn, A/B tests, and design refactors. `page.getByRole('button', { name: 'Submit' })` survives almost any visual change as long as the element is still semantically a button.
+- **Second: stable test ids.** If the site you control is using `data-testid` attributes, those are nearly as good as role+text. For sites you do not control, you do not get this option.
+- **Third: scoped CSS selectors.** `.checkout-summary .total` is OK if the structure is stable. Avoid generated class names (`._x12kj9d`) because they rotate every deploy.
+- **Fourth: text-based search.** `page.getByText('Add to cart')` works for unique text. Breaks when the same text appears in multiple places, or the language changes.
+- **Last resort: XPath.** `//div[contains(@class, "btn") and text()="Submit"]`. Works when nothing else does. Brittle, hard to read, easy to break with structural changes. Reach for it when the page genuinely lacks better anchors.
+
+The pattern that works in production: write the highest-quality selector you can, plus a fallback chain. If `getByRole` throws within 3 seconds, try a CSS variant; if that throws, fall back to act(). Each layer adds resilience at modest cost.
+
+### Sandbox · Pick the right selector strategy
+
+<Sandbox
+  id="m13-design-selector"
+  mode="js"
+  prompt={<>Implement <code>pickSelector(target)</code>. Input is an object describing what you know about the element: <code>role</code>, <code>name</code>, <code>id</code>, <code>className</code>. Return <code>{`{ strategy, value }`}</code>. Strategy preference, in order: role+text (when both <code>role</code> and <code>name</code> exist) -&gt; css (when <code>id</code> exists, then when <code>className</code> exists) -&gt; xpath fallback. The role-text value should be a string containing <code>getByRole</code>, the role, and the name; the id value should be <code>"#&lt;id&gt;"</code>; the class value should be <code>".&lt;className&gt;"</code>; the xpath fallback value should start with <code>"//"</code>.</>}
+  starter={`function pickSelector(target) {
+  // your code here
+}
+
+return pickSelector;`}
+  test={testPickSelector}
+  hint={<>Three branches plus a fallback. Build the role-text string as <code>{`\`getByRole('\${target.role}', { name: '\${target.name}' })\``}</code>. Default xpath value: <code>"//* (provide xpath manually)"</code>.</>}
+/>
+
+</Section>
+
+<Section id="captchas" num={6} title="Captchas, Cloudflare, login walls">
+
+The realistic options when an agent hits a wall:
+
+- **Residential proxies.** Cheapest mitigation for IP-based blocks. Routes traffic through real ISP IPs (Bright Data, Oxylabs, Smartproxy). Often enough for soft Cloudflare challenges.
+- **Captcha-solving services.** 2Captcha, CapSolver, Anti-Captcha. They route the captcha to humans or specialized models and return the token. Costs cents per solve; legal status varies by jurisdiction.
+- **Stagehand-style act() with screenshots.** For dynamic challenges where the captcha is custom, sometimes the model can solve it with a screenshot. This is the niche `potter_browser_act` is built for.
+- **Manual handoff.** The agent surfaces a notification ("manual review needed for example.com session"), a human solves the captcha or completes the login, the agent resumes. Often the right answer for high-stakes actions.
+- **Give up.** When the site is intentionally blocking automation and the cost of evading is higher than the value of the data, walk away. This is also a perfectly defensible engineering decision.
+
+<Callout kind="warn" title="The legal and ethical line">
+Captcha solving and aggressive anti-detection are case-by-case decisions. Evading a public scraping block on data the site offers via API is one thing; bypassing security controls on a logged-in account is another. When the agent is acting on behalf of the user (the user's own LinkedIn, the user's own bank), you are usually fine. When it is acting on someone else's site against their TOS, get legal review. "It worked technically" is not a defense.
+</Callout>
+
+</Section>
+
+<Section id="screenshots" num={7} title="Visual feedback: screenshots in the loop">
+
+When the model genuinely needs to see layout, base64 screenshots in the next user message work. The cost is real:
+
+- A 1024 x 768 screenshot at standard quality is roughly 1,500 to 3,000 tokens depending on the model's image tokenizer.
+- Multiply by every screenshot in a session. A 10-step browser flow with one screenshot per step is 15K to 30K tokens just in images.
+- The latency cost is comparable: the model has to attend to the image on every turn it is included.
+
+When screenshots are worth it:
+
+- **Captcha rendering.** The model needs to see the puzzle to solve it.
+- **Layout-driven decisions.** "Click the third card from the left." Selector-only approaches struggle; visual context unlocks the action.
+- **Debugging.** During development, screenshots tell you what the agent is actually seeing.
+
+When screenshots are wrong:
+
+- **As default page state.** Sending a screenshot every turn is a money pit. Send only when needed; rely on text-extracted page content otherwise.
+- **For text-only data.** Pricing on a page does not need a screenshot; HTML extraction is cheaper and more accurate.
+- **In a tight latency budget.** Each screenshot is hundreds of milliseconds plus model attention cost. Voice agents and similar latency-sensitive flows cannot afford them.
+
+The practical rule: screenshots are for cases the text channel cannot solve. Default to extraction; reach for screenshots when extraction fails.
+
+</Section>
+
+<Section id="act-pattern" num={8} title="Tools that wrap dynamic UIs (the potter_browser_act pattern)">
+
+There is a special-case pattern where the tool itself contains an LLM call. The shape:
+
+1. The agent emits a `tool_use` for a high-level browser tool.
+2. The browser tool's runtime takes a screenshot of the current page.
+3. The runtime calls a model with a tightly-scoped prompt: "Given this screenshot, choose the next action to satisfy the user goal."
+4. The runtime executes the chosen action via Playwright.
+5. The tool returns a structured result to the agent loop.
+
+The harness's main loop never sees the screenshot. The model decision is scoped, isolated, and disposable. The agent gets a clean structured result back.
+
+Why this asymmetry exists: returning the screenshot to the harness's main loop is expensive (tokens, latency) and couples the harness's vision capabilities to the tool. By keeping the model decision inside the tool, the tool layer stays portable across harnesses (the same Playwright tool works whether the harness is Claude Code, n8n, or a custom Node script), and the harness's working memory stays focused on its actual task.
+
+This is the **only** place in a well-designed MCP server that an LLM call belongs inside a tool. Most tools are pure data fetchers; the browser-act exception is for the case where deterministic selectors genuinely cannot work and the alternative is worse.
+
+<Callout kind="note" title="When to make the exception">
+You earn the right to embed an LLM call inside a tool only when: (1) the alternative path through the harness is meaningfully worse on cost, latency, or reliability, (2) the tool's prompt is tightly scoped, (3) the call is observable and budgeted. Avoid the temptation to add LLM calls inside other tools because "it would be smart"; that is how tool layers stop being portable.
+</Callout>
+
+</Section>
+
+<Section id="tool-grain" num={9} title="Designing browser tools an agent can actually drive">
+
+Tool grain is the abstraction level you expose to the agent. Modules 10 and 13 agree on the rule: high-level intentful tools by default, low-level only when the task genuinely requires it.
+
+The three grains, from highest to lowest:
+
+- **High-level intentful.** `purchase_product`, `extract_price`, `search_for_jobs`, `book_meeting`. The agent decides what to do; the tool decides how. Wins for almost every production agent task.
+- **Mid-level.** `fill_form`, `extract_table`, `submit_search_query`. Useful when the page shape is known but the specifics are not. Common in scraping and form-driven flows.
+- **Low-level.** `click_element_by_index`, `type_text`, `scroll_to`. Reaches for these only when the agent genuinely needs fine-grained control (debugging, novel layouts, manual exploration). Putting too many low-level decisions on the model is the fastest way to degrade reliability.
+
+A heuristic: if the tool name is a verb-phrase that maps to a user goal, you are at the right grain. If the name describes a DOM operation, you are too low.
+
+### Sandbox · Pick the tool grain
+
+<Sandbox
+  id="m13-pick-tool-grain"
+  mode="js"
+  prompt={<>Implement <code>pickTool(task)</code>. Mappings: <code>"buy-product-on-amazon"</code> -&gt; <code>"purchase_product"</code>; <code>"fill-form-with-user-data"</code> -&gt; <code>"fill_form"</code>; <code>"extract-price-from-product-page"</code> -&gt; <code>"extract_price"</code>; <code>"click-third-button"</code> -&gt; <code>"click_element_by_index"</code>; <code>"search-for-product"</code> -&gt; <code>"search"</code>. Default for unknown kinds: <code>"extract_main_text"</code>, the safest read-only fallback.</>}
+  starter={`function pickTool(task) {
+  // your code here
+}
+
+return pickTool;`}
+  test={testPickToolGrain}
+  hint={<>Object map plus a fallback. The pattern: each user-goal kind maps to one verb-phrase tool name. Low-level click_element_by_index appears only when the task description is itself low-level.</>}
+/>
+
+<BrowserToolStepperDemo />
+
+</Section>
+
+<Section id="failures" num={10} title="Failure modes and recovery">
+
+A short field guide to what breaks browser tools and how to recover:
+
+- **Selector throws.** Element not found within timeout. Fall back to the next selector strategy, then to act(). Log which strategy succeeded so you can tune the order.
+- **Stale page state.** Action lands on an outdated DOM (e.g., navigation completed mid-action). Re-anchor: re-query the element, retry once, then escalate.
+- **Timeout on a slow page.** Network is slow, the SPA is hydrating, the user's connection is bad. Increase timeout once, then surface as a transient error so the harness can retry the whole tool call later.
+- **Captcha appears mid-flow.** Decide upfront: solve, hand off, or fail. Whatever the policy, the tool should not silently succeed when a captcha was actually shown.
+- **Login wall redirect.** The session expired or was kicked. Surface to the user explicitly; do not attempt to re-authenticate from cached creds without consent.
+- **Wrong element clicked.** act() picked the wrong element; the form submitted to the wrong destination. Mitigate with extract() verification: after the action, confirm the page state matches expectations before continuing.
+- **Rate limiting.** The site responded with 429 or a soft cooldown page. Back off, surface to the user, do not hammer.
+
+The general shape: deterministic primitives by default, scoped retries with sensible budgets, model-driven fallback when needed, structured errors when even fallback fails. The agent loop above the tool only ever sees clean tool results or structured errors; it never has to reason about Playwright timeouts.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">potter_browser_act is the deliberate exception</h3>
+
+    <p>Most Potter tools are pure data fetchers that route to Proxycurl, Apify, Firecrawl, or HTTP scraping APIs. The browser tool is different: when navigating Cloudflare challenges, login redirects, or anti-bot walls, deterministic selectors fail. <code>potter_browser_act</code> takes a screenshot, calls Claude with a tightly scoped prompt to choose an action, executes via Playwright, and returns a structured result.</p>
+
+    <p>This asymmetry is intentional. The alternative, returning the screenshot to the harness's main loop, would inflate context, slow the loop, and couple Potter to specific harness vision capabilities. A scoped LLM call inside the tool keeps the harness's context clean and the tool portable across harnesses (Claude Code, n8n, a Node script).</p>
+
+    <p>The discipline that makes this exception safe: the prompt inside the tool is small, the action set is bounded, the call is logged and budgeted. Other Potter tools do not embed LLM calls because the cost is not justified for them; the data they fetch comes from APIs and HTML, not from visual reasoning.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-stagehand" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Stagehand</p><p className="text-sm text-ink-700">Browser automation library combining Playwright primitives with LLM-driven act() mode.</p></div>
+  <div id="glossary-browserbase" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Browserbase</p><p className="text-sm text-ink-700">Managed cloud browser runtime for agents. Sessions, contexts, proxies, anti-detection.</p></div>
+  <div id="glossary-playwright" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Playwright</p><p className="text-sm text-ink-700">Microsoft's browser automation library. Substrate for most agent browser tools.</p></div>
+  <div id="glossary-selector" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">selector</p><p className="text-sm text-ink-700">A query (CSS, XPath, role+text) identifying which element to interact with.</p></div>
+  <div id="glossary-flake" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">flake</p><p className="text-sm text-ink-700">A test or automation that passes sometimes and fails sometimes for non-deterministic reasons.</p></div>
+  <div id="glossary-act-mode" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">act() mode</p><p className="text-sm text-ink-700">Stagehand's LLM-driven action mode: describe what you want in natural language, model picks selector and action.</p></div>
+  <div id="glossary-residential-proxy" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">residential proxy</p><p className="text-sm text-ink-700">A proxy whose IP belongs to a real ISP, used to evade anti-bot blocks.</p></div>
+  <div id="glossary-anti-detection" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">anti-detection</p><p className="text-sm text-ink-700">Techniques to make automated browser sessions look like real users.</p></div>
+  <div id="glossary-visual-feedback" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">visual feedback</p><p className="text-sm text-ink-700">Sending screenshots back to the model so it can "see" the current page state.</p></div>
+  <div id="glossary-login-wall" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">login wall</p><p className="text-sm text-ink-700">Authentication redirect that breaks deterministic flows. Often requires manual handoff.</p></div>
+  <div id="glossary-selector-flake" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">selector flake</p><p className="text-sm text-ink-700">Specific case where a selector works once and fails the next due to dynamic class names or A/B tests.</p></div>
+  <div id="glossary-tool-grain" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool grain</p><p className="text-sm text-ink-700">The abstraction level of a browser tool (low-level click_x_y vs high-level purchase_product).</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m13-q1" question="1. Why is browser automation harder than other tools?">
+The web is dynamic, hostile to bots, and visual. Selectors break when class names rotate or A/B tests run. Captchas appear. Login walls redirect. Every interaction is a small decision under uncertainty, and the model is reading flattened text that does not match what a real visitor sees.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q2" question="2. Stagehand act() vs primitives: when does each win?">
+act() wins for novel pages, rotating selectors, and pages with frequent layout churn. Primitives win for known flows where the page structure is stable and reliability matters more than flexibility. The pattern most production agents converge on: primitives by default, act() as a fallback when primitives throw.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q3" question="3. Best selector strategy in Playwright?">
+getByRole + getByText first (maps to the accessibility tree, survives class-name churn), then test ids if the site has them, then scoped CSS, then XPath as a last resort. Visual selectors only for the impossible cases. Each tier is more brittle than the one above it.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q4" question="4. Why are residential proxies sometimes necessary?">
+Datacenter IPs trigger anti-bot blocks because most legitimate users do not browse from AWS or GCP egress. Residential proxies route through real ISP IPs and look like ordinary visitors. Often enough to defuse soft Cloudflare challenges; not a magic wand for application-level rate limits.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q5" question='5. When does a captcha mean "stop"?'>
+When the site placed it intentionally to block automation and your agent does not have authorization to bypass. Solving it (auto-solver, manual handoff) is a legal and ethical decision case-by-case. "It worked technically" does not justify bypassing security controls on a third-party site against their TOS.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q6" question="6. Visual feedback (screenshots) in the loop: cost vs benefit?">
+Screenshots are 1,500 to 3,000 tokens each on standard sizes, plus latency for the model to attend to them. Use sparingly: only when the model genuinely needs to see layout (captchas, layout-driven decisions, debugging). Default to text extraction; reach for screenshots when extraction fails.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q7" question='7. Why is potter_browser_act the exception to "no LLM inside MCP"?'>
+Returning the screenshot to the harness's main loop would inflate context, slow the loop, and couple Potter to specific harness vision capabilities. A scoped LLM call inside the tool keeps the harness's context clean and the tool portable. The discipline that makes the exception safe: tightly scoped prompt, bounded action set, logged and budgeted call.
+</CheckQuestion>
+
+<CheckQuestion id="m13-q8" question="8. High-level vs low-level browser tools: which to expose?">
+High-level: purchase_product, extract_price, search_for_jobs. Tool name is a verb phrase that maps to a user goal. Low-level (click_x_y, type_text) puts too many decisions on the model and degrades reliability. Reach for low-level only when the task genuinely requires fine-grained control.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the browser automation playbook: primitives by default, act() as fallback, screenshots only when extraction fails, high-level intentful tool grain. The next module is the other end of latency-sensitive interfaces: voice agents, where seconds become hundreds of milliseconds.
+
+<CompleteBanner moduleId="m13" nextSlug="voice-realtime" nextTitle="Module 14 · Voice and realtime agents" />
+
+</Section>
+
+<ModuleNav prevSlug="structured-output" prevTitle="Module 12 · Structured output" nextSlug="voice-realtime" nextTitle="Module 14 · Voice and realtime agents" />

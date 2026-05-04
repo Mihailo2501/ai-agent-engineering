@@ -357,7 +357,7 @@ return decideNext;`}
 
 <Section id="context-window" num={7} title="The context window">
 
-The messages array has a hard limit measured in tokens. Claude Opus 4.7 with the 1M context tier holds roughly 1,000,000 tokens. The standard tier holds 200,000. Once you hit the cap the API rejects the request. That ceiling drives almost every architectural decision in agent design: when to compact, when to summarize, when to spawn a subagent, what to put in the system prompt versus the user message.
+The messages array has a hard limit measured in tokens. Claude Opus 4.7 and Sonnet 4.6 ship with 1,000,000-token context windows by default. Haiku 4.5 holds 200,000. Once you hit the cap the API rejects the request. That ceiling drives almost every architectural decision in agent design: when to compact, when to summarize, when to spawn a subagent, what to put in the system prompt versus the user message.
 
 A practical rule: assume English averages four characters per token. A 200K-token window is roughly 800K characters, which is roughly 150,000 words, which is two and a half novels. Big, but not infinite. One badly-shaped tool that returns a 50K-token JSON blob will eat 25% of it in a single call.
 
@@ -438,7 +438,7 @@ while (true) {
 
 ### Sandbox · Make a real Claude API call
 
-Now do it for real. This sandbox runs in your browser against the actual Anthropic API using your own key. The first time you click run, you will be prompted for your key. It is stored only in your browser's localStorage.
+Now do it for real. This sandbox runs in your browser against the actual Anthropic API using your own key. The first time you click run, you will be prompted for your key. By default it lives in your browser's sessionStorage and clears when you close the tab. Toggle remember on this device in the sandbox panel to opt into localStorage.
 
 Use the provided `claude(opts)` helper to ask Claude what 17 squared is. Return the assistant's text answer.
 
@@ -494,7 +494,7 @@ return text;`}
 
 <div className="grid gap-4 md:grid-cols-2">
   <div id="glossary-token" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">token</p><p className="text-sm text-ink-700">Sub-word fragment the model operates on. Roughly four characters of English per token.</p></div>
-  <div id="glossary-context-window" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context window</p><p className="text-sm text-ink-700">Maximum tokens (input + output) the model can attend to in a single call. 200K standard, 1M extended.</p></div>
+  <div id="glossary-context-window" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context window</p><p className="text-sm text-ink-700">Maximum tokens (input + output) the model can attend to in a single call. 1M on Opus 4.7 and Sonnet 4.6; 200K on Haiku 4.5.</p></div>
   <div id="glossary-stop-reason" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">stop_reason</p><p className="text-sm text-ink-700">Field on every API response telling you why generation stopped. Drives the agentic loop's control flow.</p></div>
   <div id="glossary-tool-blocks" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool_use / tool_result</p><p className="text-sm text-ink-700">Content blocks. tool_use is the model asking to run a function; tool_result is your response with the output.</p></div>
   <div id="glossary-harness" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">harness</p><p className="text-sm text-ink-700">The program that runs the agentic loop, executes tools, and provides the user interface. Claude Code, Codex, Cursor, your custom script.</p></div>
@@ -551,8 +551,8 @@ Examples: file system access (added by Claude Code or a custom toolset), permiss
 
 Once you have read everything, played with the demos, passed the sandboxes, and answered the check questions in your own words, mark Module 01 as complete to unlock progress and award your first module badge.
 
-<CompleteBanner moduleId="m01" nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />
+<CompleteBanner moduleId="m01" nextSlug="inference" nextTitle="Module 02 · Inference" />
 
 </Section>
 
-<ModuleNav prevSlug={undefined} prevTitle={undefined} nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />
+<ModuleNav prevSlug={undefined} prevTitle={undefined} nextSlug="inference" nextTitle="Module 02 · Inference" />

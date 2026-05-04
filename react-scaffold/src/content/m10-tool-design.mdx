@@ -1,0 +1,387 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  DescriptionRewriter,
+  ToolCatalogDemo,
+  testFormatToolError,
+  testRewriteDescription,
+  testToolCatalogSearch
+} from './m10-tool-design';
+
+<ModuleHero
+  kicker="Module 10 · Tool design at scale"
+  title="Naming, descriptions, schemas, errors, gating"
+  lead="Three tools, easy. Twelve, fine. Fifty, painful unless you treat tool design as a discipline. Naming, descriptions, schemas, error messages, gating, semantic search across your tool catalog: every choice compounds."
+  trackId="building"
+  moduleId="m10"
+/>
+
+<Toc items={[
+  { href: '#prompting', label: 'Tool design is prompt engineering' },
+  { href: '#naming', label: 'Naming conventions that scale' },
+  { href: '#descriptions', label: 'Descriptions as prompts' },
+  { href: '#schemas', label: 'Schema design tricks' },
+  { href: '#errors', label: 'Error response patterns' },
+  { href: '#gating', label: 'Gating' },
+  { href: '#semantic-search', label: 'Semantic search across the catalog' },
+  { href: '#plan-then-execute', label: 'Plan-then-execute' },
+  { href: '#versioning', label: 'Versioning and deprecation' },
+  { href: '#anti-patterns', label: 'Anti-patterns' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="prompting" num={1} title="Why tool design is prompt engineering">
+
+A tool definition is a prompt with a schema attached. The model picks tools based almost entirely on the description. Module 01 made the point at small scale: with five tools you can mostly get away with terse descriptions. At 25 tools, terse becomes ambiguous; at 50, ambiguous becomes unusable.
+
+The failure mode at scale is not "model invents a tool" or "model picks something obviously wrong." It is **selection drift**: small ambiguities between two similar tools cause the model to pick inconsistently across runs. One time it picks `lookup_company`; next time on the same input it picks `search_web`; both work, neither is *the* right call. Eval suites suffer; logs become hard to read; collaborators wonder why the agent behaves differently for them than for you.
+
+The fix is discipline rather than bigger descriptions. Naming, schema design, error shapes, gating, retrieval: each one absorbs a class of selection drift. The rest of this module is the discipline.
+
+<Mermaid chart={`flowchart LR
+  USER["user query"] --> RETRIEVE["semantic tool search<br/>(top-K from catalog)"]
+  RETRIEVE --> MODEL["model picks from K"]
+  MODEL --> EXEC["execute tool"]
+  EXEC --> RESULT{"result or<br/>structured error?"}
+  RESULT -->|result| MODEL
+  RESULT -->|error.kind| RECOVER["model decides<br/>retry / fix-input / abort"]
+  RECOVER --> MODEL`} />
+
+<p className="text-sm text-ink-500">Tool selection at scale: retrieve top-K, model picks, errors come back structured so the model can recover.</p>
+
+</Section>
+
+<Section id="naming" num={2} title="Naming conventions that scale">
+
+Names matter more at scale than at small. With five tools the model recalls each description in full; with fifty, it leans on patterns in names to disambiguate.
+
+The conventions worth following:
+
+- **snake_case.** Avoid camelCase and kebab-case in tool names. Models tokenize snake_case more cleanly and use the underscores as boundaries.
+- **Namespace prefix.** Group related tools with a leading namespace. `potter_research_*`, `potter_browser_*`, `potter_linkedin_*`, `potter_web_*`. The namespace tells the model which family of tools to consider before reading descriptions.
+- **Verb-then-noun.** `lookup_company`, `send_email`, `extract_text`. Verbs first match the model's intent inference; noun-first names (`company_lookup`) feel less natural and degrade selection.
+- **Avoid abbreviations.** `get_user_email_address` beats `get_user_email_addr`. The model occasionally mis-recalls abbreviated names (especially across model versions); full words are stable.
+- **Disambiguate similar tools by suffix.** `lookup_company` and `lookup_company_lite` are clearer than `lookup_company` and `quick_company_lookup`.
+
+The smell test: read the tool name out loud as a verb phrase. "Lookup company" is fine. "Company lookup" is fine for a noun. "Lkup co" is not fine.
+
+</Section>
+
+<Section id="descriptions" num={3} title="Descriptions as prompts">
+
+The description is the most load-bearing string in your tool definition. Treat it as a prompt, not as documentation.
+
+The shape that wins:
+
+1. **What the tool does, in one sentence.** "Look up a company by domain. Returns name, size, industry, headquarters."
+2. **When to call this.** "Use this when the user mentions a company name or domain and asks about who they are, what they do, or how big they are."
+3. **When NOT to call this.** "Do not call for individuals; lookup_person covers that."
+4. **What the output looks like.** Critical when the agent needs to chain calls: "Returns { name, size, industry, hq } as a JSON object."
+
+A vague description has none of these; a great description has all four. The "when NOT to call" beat is the one most people skip, and it is the one that fixes most selection drift between tools with overlapping coverage.
+
+### Demo · Vague vs rewritten
+
+<DescriptionRewriter />
+
+<Callout kind="warn" title="Hedging in descriptions kills selection.">
+"Maybe", "possibly", "kind of", "sometimes": every hedging word in a description gives the model a reason to skip the tool. Tool descriptions are commitments. Either the tool does this thing reliably or it does not; if it does not, do not ship it.
+</Callout>
+
+### Sandbox · Rewrite a vague description
+
+<Sandbox
+  id="m10-rewrite-description"
+  mode="js"
+  prompt={<>Implement <code>rewriteDescription(vague)</code> that returns a rewritten description. Requirements: at least 50 characters longer than the input; mentions when to call (with words like "when", "if", or "use this when/to"); contains no hedging words ("maybe", "possibly", "might", "perhaps", "sometimes"). The verifier passes a one-sentence vague input ("Get info."); your output should be a real, useful description.</>}
+  starter={`function rewriteDescription(vague) {
+  // your code here
+}
+
+return rewriteDescription;`}
+  test={testRewriteDescription}
+  hint={<>Just write a real description that explains the tool, says when to call it, says when not to, and notes the output shape. The verifier is checking the structural properties, not specific wording.</>}
+/>
+
+</Section>
+
+<Section id="schemas" num={4} title="Schema design tricks">
+
+The <GLink slug="schema">schema</GLink> describes a tool's input arguments. JSON Schema; both Anthropic and MCP use it. The tricks worth knowing:
+
+- **Required vs optional.** `required` is a list of keys the model must fill. The model can still skip required fields under stress; your tool should validate before calling external APIs.
+- **Enums for closed sets.** When a field has a fixed list of values, use `enum: ["small", "medium", "large"]`. The model attends to enums more reliably than to free-form strings with "must be one of small, medium, large" tucked in the description.
+- **Defaults via description, not schema.** JSON Schema's `default` is not enforced by the API. Document the default in the field description ("If omitted, defaults to 10.") so the model knows.
+- **Conditional fields via `oneOf`.** When two fields are mutually exclusive (provide either `domain` or `name`, not both), `oneOf` makes the constraint explicit. The model reads it; the API validates it.
+- **Max array lengths.** When a field is an array (`tags: string[]`), set `maxItems`. Prevents the model from generating 100-element arrays when 5 was the intent.
+- **Nested shapes via `$ref`.** When two tools share a sub-schema (a `Person` object, an `Address` object), reference it instead of duplicating. Easier to evolve.
+
+A worked example of a richer schema:
+
+<CodeBlock lang="json">{`{
+  "name": "lookup_company",
+  "description": "Look up a company by domain or name. Returns size, industry, headquarters.",
+  "input_schema": {
+    "type": "object",
+    "oneOf": [
+      { "required": ["domain"] },
+      { "required": ["name"] }
+    ],
+    "properties": {
+      "domain": {
+        "type": "string",
+        "description": "Company website domain, e.g. acme.com. Provide this OR name, not both."
+      },
+      "name": {
+        "type": "string",
+        "description": "Company name, e.g. Acme Corp. Use only when domain is unknown."
+      },
+      "tier": {
+        "type": "string",
+        "enum": ["lite", "full"],
+        "description": "Lookup tier. lite is fast and cheap; full triggers Proxycurl. If omitted, defaults to lite."
+      }
+    }
+  }
+}`}</CodeBlock>
+
+</Section>
+
+<Section id="errors" num={5} title="Error response patterns the model can recover from">
+
+Tool errors should return structured data the model can introspect. Free-text errors leave recovery to the model's improvisation; structured errors let the agent pattern-match on the error kind and decide what to do.
+
+The pattern that holds across production agents:
+
+<CodeBlock lang="json">{`{
+  "is_error": true,
+  "kind": "rate_limited",
+  "message": "Proxycurl rate limit exceeded for this minute.",
+  "retry_hint": "retry-after-30"
+}`}</CodeBlock>
+
+The fields:
+
+- **`is_error: true`.** The flag the API and the model both look at.
+- **`kind`.** A short, machine-readable category. Common kinds: `rate_limited`, `not_found`, `auth_failed`, `network`, `validation`, `internal`.
+- **`message`.** Human-readable text for logs and the model's internal reasoning.
+- **`retry_hint`.** A recommendation: `retry-after-N`, `retry`, `fix-input`, `abort`. The agent can pattern-match this directly.
+
+Why structured errors win:
+
+- The agent can decide retry policy without re-reading prose. `retry-after-30` is not a sentence; it is an instruction.
+- Eval suites can assert on error kinds without flaky string matching.
+- Logs become structured; observability dashboards work.
+- When a tool fails for a new reason, you add a new `kind` instead of editing prose all over the codebase.
+
+### Sandbox · Format structured errors
+
+<Sandbox
+  id="m10-pick-error-shape"
+  mode="js"
+  prompt={<>Implement <code>formatToolError(err)</code> that returns <code>{'{ is_error: true, kind, message, retry_hint }'}</code>. Input <code>err</code> has shape <code>{'{ kind: "rate_limited"|"not_found"|"auth_failed"|"network"|"validation", message: string, retryAfter?: number }'}</code>. <code>retry_hint</code> mapping: <code>"rate_limited"</code> returns <code>"retry-after-N"</code> using <code>err.retryAfter</code> (e.g. <code>"retry-after-30"</code>); <code>"not_found"</code> and <code>"auth_failed"</code> return <code>"abort"</code>; <code>"network"</code> returns <code>"retry"</code>; <code>"validation"</code> returns <code>"fix-input"</code>. Always set <code>is_error: true</code>; pass through <code>kind</code> and <code>message</code>.</>}
+  starter={`function formatToolError(err) {
+  // your code here
+}
+
+return formatToolError;`}
+  test={testFormatToolError}
+  hint={<>Switch on <code>err.kind</code> to pick the retry_hint. For rate_limited, build the string with template literals: <code>{'`retry-after-${err.retryAfter}`'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="gating" num={6} title="Gating: per-user, per-context, per-time">
+
+Not every tool should be auto-approved. <GLink slug="tool-gating">Tool gating</GLink> is the policy layer that decides whether a tool runs immediately, asks for confirmation, or refuses.
+
+The gating dimensions worth thinking about:
+
+- **By tool.** Read-only tools commonly auto-approved; writes, network calls, expensive operations gated.
+- **By user.** A senior engineer's session might allowlist destructive operations; a customer-support agent's session might not.
+- **By context.** "During business hours" gating, "in production" gating, "outside dev environment" gating.
+- **By cost.** Tools that consume billed external API credits (Proxycurl, Apify) should confirm before running, especially in batch.
+- **By blast radius.** Tools that delete or send messages should confirm; tools that read should not.
+
+The pattern most production agents converge on: declare the gating policy inline with the tool definition, not in a global config that the model never sees. Knowing the policy (or at least its existence) helps the model frame its own intent: "this is a confirm-before-run tool, so I should ask the user first."
+
+</Section>
+
+<Section id="semantic-search" num={7} title="Semantic search across a large tool catalog">
+
+When the catalog grows past 30 to 50 tools, the model starts missing relevant ones because each tool's description competes for attention. The fix is retrieval before selection: pre-filter the catalog by relevance to the current query, then show the model only the top-K candidates.
+
+The shape:
+
+1. Embed all tool descriptions once (offline, cached).
+2. On each query, embed the query and find the top-K most similar tools.
+3. Pass only those K to the model.
+4. Model picks from K instead of the full catalog.
+
+For small catalogs (under 30 tools), full catalog plus solid descriptions is enough. For large catalogs, pre-filtering is the difference between "the agent finds the right tool" and "the agent picks one of three semi-right tools at random."
+
+A simple substring-based version (no embeddings, just keyword overlap) handles the small-but-growing case: count query-word matches in each tool's name and description, sort, return top-K. It works surprisingly well and is the right starting point before reaching for embeddings.
+
+### Sandbox · Top-K retrieval over a tool catalog
+
+<Sandbox
+  id="m10-tool-catalog-search"
+  mode="js"
+  prompt={<>Implement <code>selectTopK(query, catalog, k)</code>. <code>catalog</code> is an array of <code>{'{ name, description }'}</code> objects. Score each tool by how many words from the query appear in its name or description (case-insensitive substring match). Sort descending by score; return the top-K tool names as an array of strings. Empty catalog returns <code>[]</code>. The verifier covers four query/catalog cases plus an empty-catalog case.</>}
+  starter={`function selectTopK(query, catalog, k) {
+  // your code here
+}
+
+return selectTopK;`}
+  test={testToolCatalogSearch}
+  hint={<>Lowercase both sides; split the query on whitespace; for each tool, count how many query words appear in <code>name + " " + description</code>. <code>{'.sort((a, b) => b.score - a.score).slice(0, k).map(x => x.name)'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="plan-then-execute" num={8} title="Have the model describe its plan before calling">
+
+A pattern that often beats raw tool selection at scale: ask the model to describe its plan first, then execute. The plan acts as a retrieval step the model does cognitively, narrowing the tool space before any actual tool_use block fires.
+
+The shape:
+
+1. System prompt instructs the model: "Before calling tools, write a 2-3 sentence plan describing what you intend to do and which tools you will use."
+2. Model outputs the plan as a text block, then emits tool_use blocks.
+3. The plan acts both as observability (you see what the model thought) and as constraint (the model picks tools that match its own stated plan).
+
+When this helps:
+
+- Multi-step tasks where wrong early choices cascade.
+- Catalogs where several tools have overlapping coverage.
+- Eval debugging: the plan tells you why the model picked the wrong tool.
+
+When it does not help:
+
+- Latency-sensitive paths (the plan adds tokens).
+- Single-tool tasks (the model would emit the right call without the plan anyway).
+- High-volume cheap calls (plan tokens add up at scale).
+
+The cost is roughly 50 to 200 extra tokens per turn. Worth it for hard tasks; overhead for easy ones.
+
+</Section>
+
+<Section id="versioning" num={9} title="Tool versioning and deprecation">
+
+Tools evolve. The signature changes; the output shape changes; a better tool ships. The discipline:
+
+- **Ship v2 alongside v1.** New name (`lookup_company_v2` or just `lookup_company` with an updated description noting the change). Existing prompts keep using v1; new prompts can adopt v2.
+- **Mark v1 deprecated in its description.** "DEPRECATED: use lookup_company_v2 instead. This tool will be removed on 2026-09-01." The model reads the description and prefers the new tool.
+- **Communicate the migration.** README, CHANGELOG, prompt-update guidance for whoever uses the tool.
+- **Keep v1 working through the grace period.** Removing a tool that other code depends on without warning breaks production agents silently.
+
+The anti-pattern: silently changing v1's behavior or output shape. Existing prompts assume the old shape; downstream code parses results based on it. Hidden behavior changes break agents in ways that are very hard to diagnose.
+
+</Section>
+
+<Section id="anti-patterns" num={10} title="Anti-patterns: what to never do">
+
+A short list of things that hurt every time:
+
+- **Two tools that do the same job under different names.** The model picks inconsistently. Pick one, deprecate the other.
+- **Returning huge JSON blobs as tool results.** A 50K-token result inflates context and corrupts attention. Truncate, summarize, or redesign the tool to return only what the agent needs.
+- **Letting the model guess output shapes.** Document the output in the description. The agent should not have to introspect a tool result to find what fields exist.
+- **Free-text errors.** "Failed: something went wrong" gives the agent nothing to recover from. Structured errors with a kind.
+- **Sharing tool descriptions across modes.** A tool whose description says "this can do X or Y depending on context" splits attention. Two tools with two clear descriptions usually win.
+- **Hedging in descriptions.** "Maybe useful for company lookup": the model reads "maybe" and picks something else.
+- **Silent rate limiting.** Tool waits 30 seconds then returns success. The agent has no idea anything happened. Either return a structured `rate_limited` error and let the agent retry, or expose a `wait` parameter so the wait is visible.
+
+### Demo · Browse a real catalog
+
+<ToolCatalogDemo />
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter as the case study</h3>
+
+    <p>Potter ships ~25 tools across four namespaces: `potter_research_*` (full enrichment), `potter_browser_*` (dynamic-page navigation), `potter_linkedin_*` (LinkedIn-specific lookups), `potter_web_*` (general web fetching and search). The namespace tells the model what family of tool to consider before reading descriptions. Selection improves disproportionately at this scale because the model uses the namespace as a first-pass filter.</p>
+
+    <p>Each Potter tool's description follows the four-beat shape this module taught: what it does, when to call, when NOT to call, what the output looks like. The "when NOT to call" beat is what disambiguates between near-overlapping tools (<code>potter_linkedin_company</code> vs <code>potter_research_company</code>; <code>potter_web_scrape</code> vs <code>potter_browser_act</code>). Without it, the model picks inconsistently; with it, selection is reliable.</p>
+
+    <p>Errors are structured. Schemas are typed. Gating is per-tool (auto-approve for read-only, confirm for billed external API calls, confirm for browser actions). Each is a small piece of discipline; together they are why Potter scales to 25 tools without selection drift becoming the dominant failure mode.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-tool-catalog" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool catalog</p><p className="text-sm text-ink-700">The complete set of tools available to an agent in a session.</p></div>
+  <div id="glossary-description-as-prompt" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">description-as-prompt</p><p className="text-sm text-ink-700">The principle that tool descriptions function as prompts, not docs, because the model reads them to decide.</p></div>
+  <div id="glossary-schema" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">schema</p><p className="text-sm text-ink-700">The JSON Schema describing a tool's input arguments and types.</p></div>
+  <div id="glossary-enum" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">enum</p><p className="text-sm text-ink-700">A schema constraint that limits a field to a closed list of values.</p></div>
+  <div id="glossary-structured-error" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">structured error</p><p className="text-sm text-ink-700">An error response shaped as JSON the model can introspect, not a free-text string.</p></div>
+  <div id="glossary-is-error-flag" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">is_error flag</p><p className="text-sm text-ink-700">The boolean field on tool_result that signals failure to the model.</p></div>
+  <div id="glossary-tool-gating" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool gating</p><p className="text-sm text-ink-700">Per-tool execution policy (auto, confirm, deny) by user or context.</p></div>
+  <div id="glossary-semantic-tool-search" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">semantic tool search</p><p className="text-sm text-ink-700">Pre-filtering the tool catalog by relevance to the current query before showing the model.</p></div>
+  <div id="glossary-plan-then-execute" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">plan-then-execute</p><p className="text-sm text-ink-700">Asking the model to describe its plan before issuing tool calls.</p></div>
+  <div id="glossary-tool-versioning" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool versioning</p><p className="text-sm text-ink-700">Maintaining v1 and v2 of a tool so existing prompts and new prompts can both work.</p></div>
+  <div id="glossary-namespace-prefix" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">namespace prefix</p><p className="text-sm text-ink-700">A leading word identifying a tool's family (e.g. potter_research_*).</p></div>
+  <div id="glossary-deprecation-flag" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">deprecation flag</p><p className="text-sm text-ink-700">Marking a tool as discouraged in its description so the model avoids picking it.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m10-q1" question="1. Why is naming convention more important at 25+ tools than at 5?">
+At small scale the model recalls each description fully and disambiguates from content. At large scale, descriptions compete for attention and the model leans on names as a first-pass filter. Namespace prefixes (potter_research_*, potter_browser_*) let the model consider only a relevant subset before reading descriptions in detail.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q2" question="2. What is the most load-bearing string in a tool definition?">
+The description, by far. The model reads it to decide whether to invoke at all and which arguments to fill. Vague descriptions get skipped; precise descriptions get picked. Treat the description as a prompt: what the tool does, when to call, when NOT to call, what the output looks like.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q3" question='3. Why include "when NOT to call this" in a description?'>
+Tools with overlapping coverage cause selection drift: the model picks one inconsistently across runs because the descriptions both fit. The negative description is the disambiguator. "Use lookup_company; do not call for individuals (lookup_person covers that)" tells the model where the boundary is.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q4" question="4. What is a structured error and why prefer it over free text?">
+JSON with kind, message, and retry_hint. The model can pattern-match on kind to decide retry vs fix-input vs abort without re-reading prose. Eval suites can assert on kind without flaky string matching. Logs become structured. New failure modes get new kinds rather than edits to prose all over the codebase.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q5" question="5. When does semantic tool search help?">
+When the catalog exceeds roughly 30 to 50 tools and the model starts missing relevant ones because each tool's description is competing for attention. Pre-filter to top-K by relevance (substring scoring or embedding similarity); show the model only the candidates. Below that threshold, full catalog plus good descriptions is enough.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q6" question="6. A v2 of a tool ships. What happens to v1?">
+Mark v1 deprecated in its description ("DEPRECATED: use v2 instead. Will be removed on YYYY-MM-DD"). Keep it working through a grace period. Communicate the migration via README and changelog. Do not silently change v1's behavior; that breaks downstream code that assumed the old shape.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q7" question="7. Two tools, same job, different names. What goes wrong?">
+The model picks inconsistently across runs because both descriptions fit. Eval suites become flaky; observability becomes hard to read; collaborators see different agent behavior than you do. Pick one, deprecate the other, and update prompts to use the canonical name.
+</CheckQuestion>
+
+<CheckQuestion id="m10-q8" question="8. Plan-then-execute: when to use it?">
+When tool selection is ambiguous, the task is multi-step, or the agent's track record on similar tasks is mixed. The plan acts as a cognitive retrieval step that narrows the tool space before any actual tool_use block fires. Cost: 50 to 200 extra tokens per turn. Worth it for hard tasks; overhead for easy ones.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the discipline that makes 50 tools usable. The next module is the other side of the same coin: memory and retrieval, which the agent reaches for when working memory cannot hold what it needs.
+
+<CompleteBanner moduleId="m10" nextSlug="memory-retrieval" nextTitle="Module 11 · Memory and retrieval" />
+
+</Section>
+
+<ModuleNav prevSlug="managed-platforms" prevTitle="Module 09 · Managed agent platforms" nextSlug="memory-retrieval" nextTitle="Module 11 · Memory and retrieval" />

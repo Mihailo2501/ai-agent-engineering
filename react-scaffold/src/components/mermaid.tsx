@@ -35,13 +35,19 @@ export default function Mermaid({ chart }: MermaidProps) {
       const container = containerRef.current;
       if (!container || cancelled) return;
 
-      container.innerHTML = chart;
+      container.textContent = chart;
       container.removeAttribute('data-processed');
       await mermaid.run({ nodes: [container] });
     }
 
     void renderChart().catch((error: unknown) => {
-      console.error('[mermaid] render failed:', error);
+      const container = containerRef.current;
+      if (container) {
+        container.textContent = 'Diagram failed to render';
+      }
+      if (import.meta.env.DEV) {
+        console.error('[mermaid] render failed:', error);
+      }
     });
 
     return () => {

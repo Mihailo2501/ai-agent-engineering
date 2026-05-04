@@ -1,0 +1,345 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  HarnessCodeWalkthrough,
+  HarnessMatrixDemo,
+  testPermissionPrompt,
+  testPickHarness,
+  testWriteTheLoop
+} from './m07-harnesses';
+
+<ModuleHero
+  kicker="Module 07 · Harnesses"
+  title="The five-line loop everyone wraps differently"
+  lead="A harness is the program that runs the agent loop, executes tools, manages context, and exposes a UI. Claude Code, Codex, Cursor, n8n, your 50-line custom Node script: same shape, different decisions about what to wrap around the loop."
+  trackId="interfaces"
+  moduleId="m07"
+/>
+
+<Toc items={[
+  { href: '#anatomy', label: 'The harness anatomy' },
+  { href: '#claude-code', label: 'Claude Code' },
+  { href: '#codex', label: 'Codex CLI' },
+  { href: '#cursor', label: 'Cursor agent mode' },
+  { href: '#n8n', label: 'n8n + LLM nodes' },
+  { href: '#custom', label: 'Your own 50-line harness' },
+  { href: '#permissions', label: 'Permission models compared' },
+  { href: '#subagents', label: 'Subagents and orchestration' },
+  { href: '#picking', label: 'Picking a harness' },
+  { href: '#building-yours', label: 'Building one that is yours' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="anatomy" num={1} title="The harness anatomy">
+
+Behind every "agent" is a harness. The model decides; the harness orchestrates. The core loop is small enough to fit on one screen:
+
+<Mermaid chart={`flowchart TD
+  U["user input"] --> M["build messages array"]
+  M --> A["call API with messages + tools"]
+  A --> R{"stop_reason?"}
+  R -->|end_turn| OUT["render output, exit"]
+  R -->|tool_use| T["run tools in parallel"]
+  T --> RES["append tool_result blocks"]
+  RES --> M
+  R -->|other| ERR["surface, exit"]`} />
+
+<p className="text-sm text-ink-500">The shape every harness wraps. The differences are everything <em>around</em> this loop, not the loop itself.</p>
+
+What harnesses add around that core:
+
+- **A user interface.** Streaming token display, tool-call visualization, permission prompts, edit diffs, status spinners.
+- **A tool registry.** Where tools are defined, attached, gated, and named. Some harnesses ship dozens of built-ins; some let you add via MCP; some require code edits.
+- **File system integration.** Read, edit, write tools tied to a working directory. With or without permission prompts. With or without auto-formatting hooks.
+- **Context management.** When the messages array gets long, the harness decides whether to compact, summarize, or refuse. [Module 11](/m/memory-retrieval) is the deep version.
+- **Subagent orchestration.** Spawn a scoped agent for a sub-task; collect its summary; merge back. Different harnesses expose this very differently.
+- **Scheduling.** Cron, webhooks, one-shot routines. Some harnesses make scheduling first-class; some leave it to the OS.
+- **Audit logs.** Every tool call, every permission decision, every model response. Required for any production deployment; optional for personal use.
+- **Permission and multi-user models.** Who can do what. Single-user CLIs can be sloppy here; multi-user platforms cannot.
+
+The next five sections walk through how each harness in current use makes those decisions differently.
+
+</Section>
+
+<Section id="claude-code" num={2} title="Claude Code, in summary">
+
+Claude Code is Anthropic's official CLI: terminal-based, file-aware, MCP-aware, hook-driven, plugin-able, subagent-spawning. It treats your repo as the project, your filesystem as the workspace, and `settings.json` as the configuration spine.
+
+The shape that matters:
+
+- **One CLI, layered settings.** Global, user, project, project-local `settings.json` files override in a predictable order. Lets you ship project conventions through the repo and personal preferences through user settings.
+- **Hooks for lifecycle events.** UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionStart, PreCompact, Notification. Wire shell commands into specific moments.
+- **Skills, slash commands, plugins.** Three different shapes for "extend the harness" with overlapping but distinct semantics. [Module 08](/m/claude-code-surface) is the deep dive.
+- **Subagents.** First-class. Spawn from the Agent tool with a defined name, description, tool subset, and system prompt. Subagents return one summary back to the parent.
+- **MCP attachment.** `.mcp.json` per project; servers spawn alongside the session and expose their tools to the model.
+- **Permissions.** Per-tool prompts with allowlist memory. Read-only tools commonly allowlisted; writes and network calls gated.
+
+When Claude Code wins: developer iterating on code, with the model in the loop, with file access being the primary work surface. Its main strength is the depth of its extension surface; its main cost is being single-user-per-session and local-CLI-only.
+
+</Section>
+
+<Section id="codex" num={3} title="Codex CLI, in summary">
+
+Codex CLI is OpenAI's equivalent: similar shape, OpenAI side, with its own non-interactive entry point and plugin system. The dimensions where it differs from Claude Code:
+
+- **Non-interactive entry point.** `codex exec` is the first-class non-interactive command alongside the default interactive mode. Useful for CI integrations and review-shaped runs (`codex exec "review the diff..."`). The community `codex-plugin-cc` plugin wraps the exec path so Claude Code can launch Codex review runs from inside a session.
+- **Plugin system.** Codex has its own plugin format and install path. Functionality overlaps with Claude Code skills and plugins; the conventions and metadata differ.
+- **MCP support.** Modern Codex versions speak MCP, so the same Potter-style tool servers attach to either harness.
+- **Subagents.** Less standardized in 2026 than Claude Code's first-class subagent flow, with similar capabilities reachable through review/exec patterns plus plugins.
+
+When Codex wins: OpenAI-aligned shop where the team is already paying for OpenAI tier and prefers the integrations. The code-editing UX is similar enough to Claude Code that switching is a few-day learning curve, not a fundamental rewrite.
+
+</Section>
+
+<Section id="cursor" num={4} title="Cursor agent mode">
+
+Cursor is editor-integrated rather than terminal-integrated. The agent runs inside the editor, against the open repository, with the editor itself as the UX surface. Diffs, applies, multi-file edits all surface as editor operations.
+
+The dimensions:
+
+- **Editor as harness.** The agent is bound to your project the same way the editor is. File operations are auditable through editor diffs.
+- **Rules files.** Project-checked configuration in `.cursor/rules/*.mdc` (the current format; the older single-file `.cursorrules` is deprecated). Defines the conventions the agent follows. Roughly equivalent to Claude Code's `settings.json` plus shared skills.
+- **Agent vs chat distinction.** Cursor distinguishes a single-turn chat from an autonomous agent loop more explicitly than terminal harnesses do. The agent runs the loop; chat does one turn.
+- **Background agents.** Long-running tasks that operate against the project while you work on something else. Some variants run hosted, not on the user's machine.
+
+When Cursor wins: developers who live primarily in their editor and want the agent to feel like an editor feature rather than a terminal companion. The visual diff loop is its biggest UX advantage.
+
+</Section>
+
+<Section id="n8n" num={5} title="n8n + LLM nodes">
+
+n8n is a workflow runner: drag nodes, connect them, schedule triggers, and run. With LangChain Agent nodes, OpenAI nodes, Anthropic nodes, plus custom code nodes, n8n is a perfectly viable agent harness for cron-driven and webhook-triggered work.
+
+What it does well:
+
+- **Scheduling is a primitive.** Cron triggers, webhook triggers, polling triggers. The platform exists to schedule and orchestrate.
+- **SaaS connectors out of the box.** Slack, HubSpot, Gmail, Notion, Stripe, dozens more. Wiring an agent to existing tools is workflow node work, not custom code.
+- **Multi-user.** Built for teams. Workflows are versioned, permissioned, shared. Auditable per-run.
+- **Self-hostable or n8n cloud.** Production deployment is a config file, not a custom devops project.
+
+What it does less well:
+
+- **Iterative code editing.** Not its target. If you want an agent to write and refactor code on your machine, n8n is the wrong harness.
+- **Complex agent loops.** The LLM nodes work, but if the agent needs many iterations of tool use with custom decisions per turn, you fight the workflow paradigm at some point.
+
+When n8n wins: cron-driven automation, multi-system orchestration, anything that mostly looks like "trigger fires, agent runs against external APIs, results land somewhere." The Conference Voice Sequencer and the GTM agent builds in [Track 5](/) are exactly this shape.
+
+</Section>
+
+<Section id="custom" num={6} title="Your own 50-line harness">
+
+Sometimes the right answer is no harness at all: a 50-line Node or Python script that loops, calls tools, exits. When the agent is embedded in another product or runs as a headless service, general-purpose CLIs add UX you do not want and constraints you cannot drop.
+
+<HarnessCodeWalkthrough />
+
+The lesson the walkthrough underlines: the loop is short. What turns 50 lines into a real product is everything around it (permissions, subagents, audit, multi-user, deployment, observability). [Module 16](/m/evaluation) and [Module 19](/m/observability) cover the production-grade additions.
+
+When custom wins: embedded in another product (the agent is a feature, not a tool), strict deployment requirements (Lambda, Cloudflare Worker, on-prem), or extreme latency budgets where every harness behavior is a target for control. When custom loses: most of the time. General-purpose CLIs ship more polish than you will write in your first six months.
+
+### Sandbox · Write the loop yourself
+
+You implement the core. Verifier provides a fake `apiCall` and `runTool`; your function drives the loop until `end_turn` or the iteration cap.
+
+<Sandbox
+  id="m07-write-the-loop"
+  mode="js"
+  prompt={<>Implement <code>runAgent({"{ messages, apiCall, runTool, maxIters }"})</code> that runs the basic agent loop. Each iteration: call <code>apiCall({"{ messages }"})</code>, push the assistant content onto messages, and inspect <code>stop_reason</code>. If <code>"end_turn"</code>, return the messages array. If <code>"tool_use"</code>, walk the assistant content for <code>type === "tool_use"</code> blocks, run each via <code>runTool(name, input)</code>, and push a single user-role message with all the <code>tool_result</code> blocks (each shaped <code>{'{ type: "tool_result", tool_use_id, content }'}</code>). Anything else, exit gracefully. Cap at <code>maxIters</code> iterations (default 10). The verifier covers three scenarios: immediate end_turn, one tool round trip then end_turn, and an unbounded tool_use stream that should hit the cap.</>}
+  starter={`async function runAgent({ messages, apiCall, runTool, maxIters = 10 }) {
+  const log = [...messages];
+  for (let i = 0; i < maxIters; i++) {
+    // your code here
+  }
+  return log;
+}
+
+return runAgent;`}
+  test={testWriteTheLoop}
+  hint={<>Five steps per iteration: call apiCall, push assistant content, check stop_reason, run tools if tool_use, append the tool_result message. <code>{'log.push({ role: "assistant", content: resp.content })'}</code> after every API call; <code>{'log.push({ role: "user", content: toolResults })'}</code> after every tool round.</>}
+/>
+
+</Section>
+
+<Section id="permissions" num={7} title="Permission models compared">
+
+Every harness has to decide which tools the model can run without asking. Read-only tools usually fly; write and network tools usually need a prompt. The differences are about how, not whether:
+
+- **Claude Code.** Per-tool prompt, allowlist memory, `/permissions` for in-session adjustment, `settings.json` permissions block for durable rules. Allowlist read-only tools by default; gate write and network.
+- **Codex.** Similar per-tool gating with allowlist memory. The exec subcommand has its own approval semantics for shell calls.
+- **Cursor.** Approval prompts inside the editor. Tighter scope to the project than a terminal CLI; agent moves are auditable through editor diffs.
+- **n8n.** Permissions inside the workflow are open by default; the trust boundary is who can edit and trigger workflows. Different model: the workflow itself is the unit of trust.
+- **Custom.** You build it. Often "no permissions" for personal scripts; custom gating for anything shared.
+
+<Callout kind="warn" title="Allowlist read; gate write.">
+The pattern most production harnesses converge on: allowlist read-only and search-shaped tools (no side effects), prompt for writes, network calls, and anything that costs money. The exception is dev workflows where you trust the model: you can allowlist-everything for speed, knowing you accept the blast radius.
+</Callout>
+
+### Sandbox · Build a permission gate
+
+Write the gate function. Auto-approve read-only tools; route everything else through `askUser`.
+
+<Sandbox
+  id="m07-permission-prompt"
+  mode="js"
+  prompt={<>Implement <code>gateToolCall(toolName, askUser)</code> as an async function. Auto-approve set: <code>"search"</code>, <code>"list_files"</code>, <code>"get_file_content"</code>. For tools in this set, return <code>true</code> without calling <code>askUser</code> at all. For every other tool, call <code>{'await askUser("Run " + toolName + "?")'}</code> and return its boolean result directly. The verifier covers four cases: read-only tool (no prompt), read-only tool 2 (no prompt), gated tool with user approving, gated tool with user denying.</>}
+  starter={`const AUTO_APPROVED = new Set(['search', 'list_files', 'get_file_content']);
+
+async function gateToolCall(toolName, askUser) {
+  // your code here
+}
+
+return gateToolCall;`}
+  test={testPermissionPrompt}
+  hint={<><code>if (AUTO_APPROVED.has(toolName)) return true;</code> then <code>{'return await askUser(...)'}</code>. Do not call askUser for the auto-approved set; the verifier counts how many times it gets called.</>}
+/>
+
+</Section>
+
+<Section id="subagents" num={8} title="Subagents and orchestration in harnesses">
+
+A <GLink slug="subagent">subagent</GLink> is a scoped child agent the main loop spawns to do a sub-task with its own context, optional tool subset, and own system prompt. The parent gets back a single summary instead of dragging the entire sub-conversation into its own context window. The pattern was introduced in [Module 03](/m/agent-patterns#orchestrator-workers); this section is about how harnesses implement it.
+
+- **Claude Code.** First-class. The Agent tool spawns a subagent from a definition in `/.claude/agents`. Definitions specify name, description, tool list, system prompt, and optional model override. Subagents return a single summary back. Multiple can run in parallel.
+- **Codex.** Similar capabilities, less standardized in the public surface as of 2026. Reachable via subcommands, plugin-defined helpers, and exec patterns.
+- **Cursor.** Background agents and rules files give you the building blocks; the conventions for spawning are different from Claude Code.
+- **n8n.** Sub-workflows and the LangChain Agent node give you the equivalent: spawn a sub-workflow, collect its result, merge into the parent flow.
+- **Custom.** Trivial: nest the loop. The hard part is context isolation, tool scoping, and result merging. Worth implementing only when subagents are core to the product.
+
+The cost trade-off matters. A subagent gets you context isolation (the parent does not pay tokens for the child's intermediate steps) at the cost of one extra API round trip and a separate decision boundary the model has to navigate. Spawn for parallelizable, well-scoped, summary-returning tasks. Do not spawn when the parent could just do the work in two more turns.
+
+</Section>
+
+<Section id="picking" num={9} title="Picking a harness for the job">
+
+The decision tree that holds most of the time:
+
+1. **Are you iterating on code locally as a developer?** Claude Code or Cursor. Pick by where you live: terminal vs editor.
+2. **Is your team OpenAI-aligned and on Codex already?** Codex.
+3. **Is the work cron-driven or webhook-triggered with multi-system orchestration?** n8n.
+4. **Is the agent embedded in another product?** Custom.
+5. **Default if none of the above bites?** Claude Code, with MCP for shared tools.
+
+### Demo · The harness comparison matrix
+
+<HarnessMatrixDemo />
+
+### Sandbox · Pick a harness
+
+<Sandbox
+  id="m07-pick-harness"
+  mode="js"
+  prompt={<>The task object has a <code>kind</code> field. Mappings: <code>"solo-dev-coding-locally"</code> returns <code>"claude-code"</code>; <code>"editor-integrated-coding"</code> returns <code>"cursor"</code>; <code>"openai-aligned-team"</code> returns <code>"codex"</code>; <code>"nightly-multi-system-automation"</code> returns <code>"n8n"</code>; <code>"embedded-in-product"</code> returns <code>"custom"</code>; <code>"one-off-script"</code> returns <code>"custom"</code>. Anything else falls back to <code>"claude-code"</code>.</>}
+  starter={`function pickHarness(task) {
+  // your code here
+}
+
+return pickHarness;`}
+  test={testPickHarness}
+  hint={<>Object map plus a fallback. The interesting question is the default: when you do not know, "claude-code" is the safest pick for code-shaped work because its extension surface absorbs the most variety.</>}
+/>
+
+</Section>
+
+<Section id="building-yours" num={10} title="Building a harness that is yours">
+
+What you gain by writing your own harness: full control over UX, permission model, deployment, and feature surface. No conventions to fight, no ecosystem assumptions, no vendor surprise. What you lose: every feature you do not write does not exist. Permission UI, audit logs, multi-user sessions, plugin marketplaces, MCP attach, hook lifecycle: those are all months of work pretending to be days.
+
+The honest framing: most "I should write my own harness" instincts are wrong. The 50-line loop is two days; everything that makes it usable in production is months. Pay the harness tax (Claude Code, Cursor, n8n) until the harness becomes a real constraint, then build.
+
+When custom is the right call:
+
+- **Embedded.** The agent is a feature in your product. A general-purpose CLI cannot ride along.
+- **Latency-critical.** Voice agents, real-time UIs, anything where every layer of UX is a target for tuning.
+- **Strict deployment.** On-prem with no terminal, Cloudflare Worker, embedded device. Where the harness has to fit your deployment, not the other way around.
+- **Specific UX.** A product where the agent's interaction shape is core to the value, not interchangeable with a CLI.
+
+When it is not the right call: convenience, "I want to learn how it works" (build it as a side project, run on Claude Code in production), "the harness annoys me" (try a different harness first; switching is days, building is months).
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is not a harness</h3>
+
+    <p>Potter is a set of tools. The same Potter MCP server is consumed by Claude Code (today), by Cursor agents that speak MCP (also today), by Codex when its MCP support matures, and by Mihailo's standalone Potter CLI which embeds the agent loop directly. The harness layer chooses how to UX it; Potter does not care.</p>
+
+    <p>This is exactly the separation [Module 01](/m/primitives#potter-angle) introduced and [Module 06](/m/api-sdk-cli-mcp) formalized. Harness owns the loop, MCP owns the tools, providers do the data work. The harness's responsibility list (UI, permissions, file access, subagent orchestration, scheduling, audit) is everything Potter intentionally does not do. That separation is what keeps Potter portable across the harnesses this module compares.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-harness" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">harness</p><p className="text-sm text-ink-700">The program that runs the agent loop, manages tools, exposes UI.</p></div>
+  <div id="glossary-tool-registry" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">tool registry</p><p className="text-sm text-ink-700">Where the harness keeps the available tools the model can invoke.</p></div>
+  <div id="glossary-permission-gate" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">permission gate</p><p className="text-sm text-ink-700">The check the harness runs before executing a tool, asking the user if needed.</p></div>
+  <div id="glossary-subagent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">subagent</p><p className="text-sm text-ink-700">A scoped agent the main loop spawns to do a sub-task with its own context.</p></div>
+  <div id="glossary-settings-layering" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">settings layering</p><p className="text-sm text-ink-700">Override mechanism (global, project, local) for harness configuration.</p></div>
+  <div id="glossary-hook" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">hook</p><p className="text-sm text-ink-700">A user-defined callback the harness invokes at lifecycle events.</p></div>
+  <div id="glossary-mcp-attach" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP attach</p><p className="text-sm text-ink-700">The act of connecting an MCP server to a harness so its tools become available.</p></div>
+  <div id="glossary-context-budget" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context budget</p><p className="text-sm text-ink-700">The harness's strategy for keeping conversation context under the model's window.</p></div>
+  <div id="glossary-audit-log" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">audit log</p><p className="text-sm text-ink-700">Persistent record of every tool call, decision, and approval the harness handled.</p></div>
+  <div id="glossary-permissions-allowlist" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">permissions allowlist</p><p className="text-sm text-ink-700">List of pre-approved tool calls the harness can run without asking.</p></div>
+  <div id="glossary-plugin" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">plugin</p><p className="text-sm text-ink-700">A bundle of skills, hooks, and tools that extend a harness.</p></div>
+  <div id="glossary-custom-harness" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">custom harness</p><p className="text-sm text-ink-700">A harness you wrote yourself, usually 50 to 500 lines, scoped to one job.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m07-q1" question="1. What does every harness wrap around the same core loop?">
+Tool registry, tool execution, permission gating, file system access, subagents, scheduling, audit logs, UI. The loop itself is roughly five lines (call API, append assistant turn, check stop_reason, run tools, append tool_result, repeat). Everything else is what makes the harness a real product instead of a sample script.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q2" question="2. When is writing your own 50-line harness the right call?">
+When the agent is embedded in another product where general-purpose harnesses add UX you do not want. When the deployment story is non-standard (Lambda, Cloudflare Worker, on-prem). When you have specific UX requirements that diverge from any general-purpose CLI. Most "I should write my own harness" instincts otherwise turn out to be premature; the harness tax is real but cheaper than building feature parity.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q3" question="3. How do permission models compare across harnesses?">
+Claude Code and Codex use per-tool prompts with allowlist memory; settings.json controls durable rules. Cursor scopes prompts to the editor's diff loop. n8n is permissionless inside the workflow; the trust boundary is who can edit and trigger workflows. Custom harnesses build it themselves, often choosing "no permissions" for personal scripts and custom gating for anything shared.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q4" question="4. Why is n8n a better fit than Claude Code for cron-driven agents?">
+n8n has scheduling, multi-system connectors, retry, multi-user, and a workflow UI built in. Claude Code is iterative and developer-driven, designed for live-coding sessions, not always-on automation. The Conference Voice Sequencer and GTM agent builds in Track 5 are exactly the shape n8n is built for: trigger fires, agent runs against external APIs, results land somewhere.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q5" question="5. A subagent in Claude Code: what does 'scoped' actually mean?">
+The subagent has its own context window (does not share the parent's messages array), its own tool set if you specify (commonly a subset of the parent's tools), its own system prompt, and returns one summary back to the parent. Context isolation is the main win: the parent does not pay token cost for the subagent's intermediate steps. The cost is one extra API round trip and a separate decision boundary the model has to manage.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q6" question="6. When you want a tool callable from many harnesses, do you write it as a Claude Code skill or an MCP server?">
+MCP server. Skills are Claude Code only and do not port. MCP is portable across Claude Code, Cursor, Codex, your custom CLI, and any other harness that speaks the protocol. Module 06 covered the layer split; the practical rule for tools is: if you might want it elsewhere, ship MCP.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q7" question="7. Permission allowlists and security: what is the trade-off?">
+Allowlisting a tool means it runs without asking, which is great for read-only operations and small for the blast radius of the agent making a mistake. Allowlisting write or network operations means a misbehaving tool or prompt injection can do harm without a chance to block. The pattern most harnesses converge on: allowlist read-only and search-shaped tools, gate writes and network calls, and accept the productivity hit of an extra prompt for anything that mutates state.
+</CheckQuestion>
+
+<CheckQuestion id="m07-q8" question="8. A custom harness 'ships in a week, costs months of feature parity.' What does that mean?">
+Writing the loop is fast; you can have a working agent in two days. Building everything around the loop (permissions, sessions, audit, subagents, multi-user, scheduling, plugin support, MCP attach, observability) is months of work. The "I have an agent" claim after a week is true; the "I have a harness" claim is not. Most teams should pay the harness tax of a general-purpose CLI until the cost of working around the harness exceeds the cost of building one.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have a comparison map of the harness landscape. The next module is the deep version of Claude Code specifically: hooks, skills, plugins, slash commands, settings layering, MCP attach, subagents.
+
+<CompleteBanner moduleId="m07" nextSlug="claude-code-surface" nextTitle="Module 08 · Claude Code extension surface" />
+
+</Section>
+
+<ModuleNav prevSlug="api-sdk-cli-mcp" prevTitle="Module 06 · API · SDK · CLI · MCP" nextSlug="claude-code-surface" nextTitle="Module 08 · Claude Code extension surface" />

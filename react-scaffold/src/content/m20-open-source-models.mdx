@@ -1,0 +1,349 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  HubTourDemo,
+  QuantizationDemo,
+  testPickModelTier,
+  testQuantFit
+} from './m20-open-source-models';
+
+<ModuleHero
+  kicker="Module 20 · Open source models and Hugging Face"
+  title="The other half of the model ecosystem"
+  lead="Open-weights models live in a different ecosystem from frontier APIs. Hugging Face is the gravitational center: model registry, evaluation leaderboards, demo spaces, fine-tuning recipes. If you ship agents in production today, you are using frontier models. But knowing the OSS landscape is the difference between informed and dependent."
+  trackId="applied"
+  moduleId="m20"
+/>
+
+<Toc items={[
+  { href: '#what-is-oss', label: 'What "open source" means for models' },
+  { href: '#hub-tour', label: 'The Hugging Face Hub tour' },
+  { href: '#hf-pricing', label: 'Hugging Face subscription tiers' },
+  { href: '#run-local', label: 'Running open-weights locally' },
+  { href: '#quantization', label: 'Quantization' },
+  { href: '#fine-tune', label: 'Fine-tuning at the OSS layer' },
+  { href: '#lineup', label: 'Open-weights model lineup' },
+  { href: '#oss-vs-frontier', label: 'When OSS beats frontier' },
+  { href: '#mixing', label: 'Mixing OSS and frontier' },
+  { href: '#oss-agents', label: 'The state of OSS agents' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-is-oss" num={1} title='What "open source" means for models'>
+
+The first thing to clear up: the words.
+
+- **<GLink slug="open-weights">Open-weights</GLink>.** Model files released for download with a license that lets you use them. Llama, Qwen, DeepSeek, Mistral. You get the inference-ready checkpoint; you do not get the training data or the training code.
+- **Open source (strict).** Open-weights plus training code plus dataset plus reproducible training pipeline. Rare; OLMo and a few others approach this. Most things called "open source" are open-weights.
+- **License variations.** "Open" is not one license. Llama's license has commercial-use restrictions; Apache 2.0 and MIT are permissive; CC-BY-NC blocks commercial use. Always read the license; "open" varies.
+
+What you actually get when you download an open-weights model:
+
+- Inference-ready files (PyTorch checkpoint, GGUF quantization, sometimes ONNX).
+- A model card describing architecture, training data hints, intended use, eval scores.
+- A license PDF or README.
+- Often a tokenizer, sometimes inference utilities.
+
+What you do not get:
+
+- The dataset (almost never released for frontier-scale models).
+- The training code at full scale.
+- Any guarantee the model is safe; you own the deployment risk.
+
+</Section>
+
+<Section id="hub-tour" num={2} title="The Hugging Face Hub tour">
+
+<GLink slug="huggingface">Hugging Face</GLink> is the gravitational center of the open-weights ecosystem. Most models, datasets, demos, and inference endpoints flow through the Hub.
+
+<HubTourDemo />
+
+How you actually use it day to day:
+
+- **Browse Models.** Pick a base model. Read the card. Check the license. Look at the leaderboards.
+- **Run a Space.** Try the model in a Gradio demo before downloading.
+- **Download via the CLI or transformers.** `huggingface-cli download` or `from transformers import AutoModelForCausalLM`.
+- **Spin up an Inference Endpoint.** Hosted production-ready API on top of the model files.
+- **Search Datasets.** When you need eval cases or fine-tuning data, the Hub is the first stop.
+
+</Section>
+
+<Section id="hf-pricing" num={3} title="Hugging Face subscription tiers">
+
+Roughly, in 2026:
+
+- **Free.** Hub access, public models, public datasets, free Spaces (CPU). Sufficient for most learning and prototyping.
+- **PRO ($9/mo).** Faster Inference API, Spaces upgrades (better hardware), larger storage, priority access to new features. Good for individuals doing more than light experimentation.
+- **Team ($20/mo per seat).** Multi-seat workspace, private model and dataset sharing, basic team controls. The right tier when two or more people share the same hub workspace.
+- **Enterprise ($50+/mo per seat).** Audit logs, SSO, role-based access control, advanced team management, dedicated support, compliance commitments. Needed when you are running OSS models inside a company with compliance requirements.
+
+What you get for paying:
+
+- **Faster inference on the free Inference API.** Free is rate-limited; Pro and above are not.
+- **Larger Spaces.** Run bigger models in the demo apps.
+- **Storage.** Private datasets and models that you do not want public.
+- **Hosting reliability.** Inference Endpoints with SLA-backed uptime.
+
+What you do not need to pay for:
+
+- Downloading public models. Free.
+- Reading model cards, leaderboards, datasets. Free.
+- Running models locally with Ollama or LM Studio after download. Free, modulo your hardware cost.
+
+Verify pricing when you commit; the offering changes.
+
+</Section>
+
+<Section id="run-local" num={4} title="Running open-weights locally">
+
+Four common paths, ordered by friction (easiest first):
+
+- **<GLink slug="ollama">Ollama</GLink>.** The default for "I want to try a local model on my Mac". `ollama run llama3.2` and you are running. Wraps llama.cpp underneath. Mac-friendly with Apple Silicon optimizations.
+- **<GLink slug="lm-studio">LM Studio</GLink>.** GUI app. Browse models, download, chat, switch models in a UI. Right for users who prefer a desktop app to the terminal. Same llama.cpp engine underneath.
+- **<GLink slug="llama-cpp">llama.cpp</GLink>.** The C++ inference engine that runs most local-model tools. Gives you the most control, the most flexibility, and the most YAGNI surface. Use directly when Ollama and LM Studio do not give you the knobs you need.
+- **<GLink slug="vllm">vLLM</GLink>.** High-throughput inference server. Right for production hosted serving (your own GPU box, not a laptop). Optimizations like PagedAttention deliver multi-x throughput improvements over naive serving.
+
+Sizing for Apple Silicon (the audience):
+
+- **M1 / M2 with 8 GB RAM.** Limited to small models (3B params, Q4 quant). Realistic for chat at modest quality; rough for tool use.
+- **M1 / M2 / M3 / M4 with 16 GB.** 7B at Q4 to Q8. Comfortable for most local agent experiments.
+- **M2 / M3 / M4 Pro / Max with 32-64 GB.** 13B to 70B with appropriate quantization. Good local agent quality on most tasks.
+- **M3 / M4 Max / Ultra with 96-192 GB.** 70B at Q5 or Q8. Best-case local agent quality on consumer hardware.
+
+</Section>
+
+<Section id="quantization" num={5} title="Quantization">
+
+<GLink slug="quantization">Quantization</GLink> is reducing model precision to fit smaller hardware. The GGUF format dominates local inference; Q4_K_M, Q5_K_M, Q8_0, fp16 are the levels you will see.
+
+The trade-off:
+
+- **fp16 (16-bit).** Original precision. Highest quality. ~2 GB per billion parameters.
+- **Q8_0.** 8-bit quantization. Near-original quality. ~1 GB per billion params.
+- **Q5_K_M.** 5-bit. Modest quality drop, much smaller footprint. ~0.75 GB per billion params.
+- **Q4_K_M.** 4-bit. Practical floor for usable agents. Quality drops noticeably but stays usable. ~0.6 GB per billion params.
+- **Below Q4.** Q3, Q2, sub-2-bit experiments. Quality drops sharply; mostly research or memory-extreme deployments.
+
+The rule of thumb: pick the highest quality that fits in (RAM minus 4 GB) of headroom. Headroom matters because the model weights are not the only thing in memory; KV cache (proportional to context length), the OS, your other apps, all eat into available RAM.
+
+<QuantizationDemo />
+
+### Sandbox · Pick the quant level
+
+<Sandbox
+  id="m20-quant-fit"
+  mode="js"
+  prompt={<>Implement <code>pickQuantization({"{ ramGB, modelParams }"})</code>. Approximate sizes per billion params: fp16 = 2.0 GB, Q8_0 = 1.0 GB, Q5_K_M = 0.75 GB, Q4_K_M = 0.6 GB. Pick the highest quality whose size fits in <code>ramGB - 4</code> (4 GB headroom). If nothing fits cleanly, return <code>"Q4_K_M"</code> as the floor. Returns the quant string.</>}
+  starter={`function pickQuantization({ ramGB, modelParams }) {
+  // your code here
+}
+
+return pickQuantization;`}
+  test={testQuantFit}
+  hint={<>Iterate quantizations from largest to smallest: fp16, Q8_0, Q5_K_M, Q4_K_M. For each, compute <code>need = modelParams * ratio</code>. Return the first that fits in <code>ramGB - 4</code>. If none fit, return Q4_K_M.</>}
+/>
+
+</Section>
+
+<Section id="fine-tune" num={6} title="Fine-tuning at the OSS layer">
+
+Fine-tuning open-weights models is where OSS most clearly outpaces frontier. Three flavors:
+
+- **Full fine-tune.** Update all weights. Most expensive; most flexible. Rarely needed; usually overkill.
+- **<GLink slug="lora">LoRA</GLink>.** Low-Rank Adaptation. Train a small set of additional weights on top of the frozen base model. Cheap, fast, surprisingly effective. The default for most OSS fine-tuning today.
+- **<GLink slug="qlora">QLoRA</GLink>.** LoRA on a quantized base model. Even cheaper. Usable on consumer GPUs; sometimes on Apple Silicon with enough RAM.
+
+When to fine-tune at all:
+
+- **Style and format.** Want the model to consistently output a specific tone, structure, or domain idiom (legal, medical, your company's writing voice).
+- **Format following at small models.** A 7B base model can match a frontier model's format compliance after fine-tuning, even though the underlying reasoning is weaker.
+- **Specific behaviors.** Refusal patterns, persona, instruction-following idiosyncrasies.
+
+When NOT to fine-tune:
+
+- **Facts.** Use RAG ([Module 11](/m/memory-retrieval)). Fine-tuned facts decay; RAG facts stay current.
+- **General quality.** Frontier models beat fine-tuned 7B on broad capability. Pay for the frontier API instead.
+- **Production agent quality without exhaustive eval.** Fine-tuning can introduce regressions in unexpected places. Eval ([Module 16](/m/evaluation)) is mandatory.
+
+The tooling: peft and trl from Hugging Face, axolotl as a higher-level config-driven recipe runner, transformer-lab and similar GUIs for users who prefer interfaces.
+
+</Section>
+
+<Section id="lineup" num={7} title="Open-weights model lineup">
+
+The 2026 lineup, roughly. Verify current top picks when you commit; the leaderboards move every few months.
+
+- **<GLink slug="llama-family">Llama family</GLink>.** Meta's open-weights line. Llama 3.x and 4.x families. Strong all-around; widely deployed. Function-calling support is mature.
+- **<GLink slug="qwen-family">Qwen family</GLink>.** Alibaba's line. Qwen 2.5 and Qwen 3 are highly competitive, especially on code and multilingual. Strong tool-use reliability.
+- **DeepSeek family.** Strong on reasoning; prominent in 2025 with R1-style chain-of-thought variants. Mixture-of-experts versions push capability per active parameter.
+- **Mistral family.** Mistral, Mixtral, smaller specialized models. Solid choice for European-aligned stacks; good function-calling.
+- **Phi family.** Microsoft's small-model line. Punches above its parameter count; useful for edge and consumer-device deployment.
+- **Gemma family.** Google's open-weights line. Less popular for agents specifically; strong for some research workflows.
+
+What to look for when picking:
+
+- **Function-calling reliability** for agents. Some models are great at chat but mediocre at tool use. Test specifically.
+- **Context length.** Production agent loops need at least 32K; longer is often better.
+- **Quantization friendliness.** Some models retain quality better at Q4 than others. Check community-shared GGUF benchmarks.
+- **License.** Llama license has restrictions; Apache 2.0 and MIT are permissive. Confirm you can use it the way you intend.
+
+</Section>
+
+<Section id="oss-vs-frontier" num={8} title="When OSS beats frontier">
+
+The honest framing: rarely, for production agent quality. The cases where OSS local genuinely wins:
+
+- **Privacy required.** Data cannot leave your infrastructure. Frontier APIs are out; OSS local is the only path. Common in healthcare, legal, and government contexts.
+- **Offline.** Air-gapped environments, edge devices, intermittent connectivity. Frontier APIs need internet; OSS local does not.
+- **Very high cheap-call volume.** Classifying millions of items per day where a 7B model at $0 per call (your hardware) beats Haiku at $0.0005 per call after the GPU amortizes.
+- **Research and fine-tuning experimentation.** You need to modify the model, see internals, run ablations. Frontier APIs do not let you; OSS does.
+
+Cases where OSS hosted (Together AI, Fireworks, Replicate) wins:
+
+- **Cost-sensitive agent serving.** Lower per-token cost than frontier; quality close enough for many use cases.
+- **Avoiding frontier provider lock-in** while not wanting to operate GPUs yourself.
+
+Cases where frontier still wins:
+
+- **Production agent quality.** Tool-use reliability, long-context coherence, edge-case behavior. Frontier models still lead by meaningful margins on the hardest agent tasks.
+- **Latency.** Hosted frontier infrastructure is often faster than OSS hosted at the same price tier; certainly faster than local on consumer hardware.
+- **Newest capabilities.** Vision, extended thinking, voice (where applicable). Frontier ships these first.
+
+### Sandbox · Pick OSS or frontier
+
+<Sandbox
+  id="m20-pick-oss-or-frontier"
+  mode="js"
+  prompt={<>Implement <code>pickModelTier(constraints)</code> returning <code>"frontier"</code>, <code>"oss-hosted"</code>, or <code>"oss-local"</code>. Mappings on <code>qualityRequired</code>: <code>"production"</code> -&gt; <code>"frontier"</code>; <code>"volume"</code> -&gt; <code>"oss-hosted"</code>; <code>"privacy"</code> -&gt; <code>"oss-local"</code>; <code>"research"</code> -&gt; <code>"oss-local"</code>.</>}
+  starter={`function pickModelTier(constraints) {
+  // your code here
+}
+
+return pickModelTier;`}
+  test={testPickModelTier}
+  hint={<>Object map keyed by <code>constraints.qualityRequired</code>. Production is always frontier; volume goes to OSS hosted; privacy and research stay local.</>}
+/>
+
+</Section>
+
+<Section id="mixing" num={9} title="Mixing OSS and frontier">
+
+Routing across providers, not just within one provider:
+
+- **OSS for cheap classifier turns; frontier for hard reasoning.** Same routing logic as [Module 17](/m/cost-economics), one tier deeper. Llama 3.x 8B for "is this a refund or order question?"; Sonnet for the actual reasoning.
+- **Provider-agnostic SDKs.** Vercel AI SDK, OpenRouter, LiteLLM let you swap models with one parameter. Useful for routing across providers and for fallback when a primary is unavailable.
+- **Graceful degradation.** When the frontier API is down, fall back to OSS hosted; mark the response as "degraded" so the user knows they got the secondary path.
+- **A/B per-feature.** Some features run on OSS; some on frontier. The routing layer picks based on feature config, not per-call.
+
+The pattern that has held: the cheap path is OSS or Haiku-class; the default path is Sonnet-class; the hard path is Opus-class or specialized. Layered, configurable, observable.
+
+</Section>
+
+<Section id="oss-agents" num={10} title="The state of OSS agents specifically">
+
+For agents, the OSS layer lags frontier on:
+
+- **Function-calling reliability.** Llama 3.1+ and Qwen 2.5+ are usable; Llama 4 and Qwen 3 close the gap further. Frontier models still produce fewer malformed tool calls per 1000 turns.
+- **Long-context coherence.** OSS models with stated 128K contexts often degrade well before hitting the limit; frontier models hold up better at the edges.
+- **Multi-turn tool use.** Chained tool calls with mid-flow corrections. OSS recoverability is improving but lags Claude and GPT-class models.
+- **Refusal nuance.** OSS models tend toward over-refusal or under-refusal; calibration is harder out of the box.
+
+Where OSS is competitive or ahead:
+
+- **Cost per token.** OSS hosted is cheaper than frontier; OSS local is free at marginal cost (your hardware).
+- **Privacy and control.** Air-gapped, on-prem, end-to-end ownership.
+- **Experimental flexibility.** Modify, fine-tune, ablate, study; impossible on closed APIs.
+
+The honest framing for production agents: use frontier for the loop's reasoning; use OSS for cheap utility turns and for environments where frontier is not allowed. The pure-OSS production agent is possible but rare; the hybrid is increasingly common.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is provider-agnostic at the harness level</h3>
+
+    <p>The MCP protocol does not care which model is on the other side of the harness. Potter exposes tools via MCP; the agent loop wrapping Potter can use Claude (default), GPT-class, Gemini, or any open-weights model served by Ollama, vLLM, Together, or Fireworks. The tools work the same way; the harness picks the model.</p>
+
+    <p>This positions Potter to ride out provider shifts. Frontier models will keep evolving; new OSS models will appear; routing strategies will change. Potter does not change. The same tool catalog works in a Claude Code session calling Sonnet, in an n8n workflow calling Llama 3.x via OpenRouter, in a custom Node script calling Qwen via Together.</p>
+
+    <p>The Module 20 lesson, applied at the tool layer: do not pin model choice. The model lives in the harness, where you can route it, swap it, fine-tune it. Tool layers stay agnostic so users can change providers without rewriting tools.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-open-weights" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">open-weights</p><p className="text-sm text-ink-700">Model files released for download, often with a permissive license. Different from "open source" which implies training code too.</p></div>
+  <div id="glossary-huggingface" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Hugging Face</p><p className="text-sm text-ink-700">The gravitational center of the open-weights ecosystem. Hub, Spaces, Datasets, Endpoints.</p></div>
+  <div id="glossary-ollama" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Ollama</p><p className="text-sm text-ink-700">Wrapper around llama.cpp for easy local model serving. Default for most local inference.</p></div>
+  <div id="glossary-lm-studio" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">LM Studio</p><p className="text-sm text-ink-700">GUI app for running open-weights models locally.</p></div>
+  <div id="glossary-llama-cpp" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">llama.cpp</p><p className="text-sm text-ink-700">The C++ inference engine under most local-model tools.</p></div>
+  <div id="glossary-vllm" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">vLLM</p><p className="text-sm text-ink-700">High-throughput inference server for hosted serving.</p></div>
+  <div id="glossary-gguf" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">GGUF</p><p className="text-sm text-ink-700">The dominant quantization format for local inference.</p></div>
+  <div id="glossary-quantization" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">quantization</p><p className="text-sm text-ink-700">Reducing model precision (fp16 to int8 to int4) to fit smaller hardware, with quality trade-off.</p></div>
+  <div id="glossary-lora" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">LoRA</p><p className="text-sm text-ink-700">Low-Rank Adaptation. Fine-tune a small subset of weights, cheap and fast.</p></div>
+  <div id="glossary-qlora" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">QLoRA</p><p className="text-sm text-ink-700">LoRA on a quantized base model. Even cheaper.</p></div>
+  <div id="glossary-llama-family" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Llama family</p><p className="text-sm text-ink-700">Meta's open-weights model line. Llama 3.x, Llama 4.x, etc.</p></div>
+  <div id="glossary-qwen-family" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Qwen family</p><p className="text-sm text-ink-700">Alibaba's open-weights model line. Strong on code and multilingual.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m20-q1" question="1. Open-weights vs open-source: practical difference?">
+Open-weights gives you the model file. Open-source (strict) would also give you the training code and dataset. Most "open source models" are really open-weights. Always read the license; "open" varies in meaning.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q2" question="2. When does OSS local actually beat a frontier API?">
+Privacy-required workloads (data cannot leave your infrastructure), offline scenarios, very high cheap-call volume where the GPU amortizes, research and fine-tuning experimentation. Rarely for production agent quality on the hardest tasks; frontier still leads on tool-use reliability and long-context coherence.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q3" question="3. Quantization main trade-off?">
+Smaller files, less RAM, fits more hardware. Costs some quality. Q4_K_M is roughly the practical floor for usable agents on local; Q5 and Q8 are reasonable production choices when the hardware allows; fp16 is original quality.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q4" question="4. When does LoRA fine-tuning win over RAG?">
+Style and format adaptation. Output tone, terminology, refusing in a specific way, output structure. Almost never for facts; fine-tuned facts decay because the world changes faster than you re-train. Use RAG for facts, LoRA for style.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q5" question='5. Best default for "I want to try a local model on my Mac"?'>
+Ollama plus a recent Qwen or Llama at Q4_K_M. Free, fast install, decent quality. 7B fits comfortably on 16 GB Apple Silicon; 13B works on 32 GB and up.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q6" question="6. HF Pro subscription: what do you actually get?">
+Faster Inference API (free tier is rate-limited), Spaces upgrades for better hardware, larger storage for private artifacts, priority support, ability to use newer Inference Endpoints features. Not a strict requirement for casual use; useful when you outgrow the free tier.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q7" question="7. OSS function-calling reliability vs frontier?">
+Lags frontier. Llama 3.1+ and Qwen 2.5+ are usable for tool calling but the malformed-call rate is higher than Claude or GPT-4-class. Improving with each release; not yet at parity for production agent loops with many tools.
+</CheckQuestion>
+
+<CheckQuestion id="m20-q8" question="8. Why does Potter not pin model choice?">
+The model lives in the harness layer. Tool layers should be agnostic so users can swap providers without rewriting tools. Potter works the same whether the harness is Claude Code, n8n calling Llama, or a custom script using OpenRouter. Coupling the tool layer to a specific provider would break that portability.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the OSS model playbook: licensing, the Hugging Face Hub, local serving, quantization, fine-tuning, the model lineup, when OSS wins versus frontier, and the routing patterns that mix them. The next module is the working engineer's daily tool: coding agents.
+
+<CompleteBanner moduleId="m20" nextSlug="coding-agents" nextTitle="Module 21 · Coding agents in depth" />
+
+</Section>
+
+<ModuleNav prevSlug="observability" prevTitle="Module 19 · Observability and deployment" nextSlug="coding-agents" nextTitle="Module 21 · Coding agents in depth" />

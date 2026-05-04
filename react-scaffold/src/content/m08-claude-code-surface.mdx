@@ -1,0 +1,472 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  ExtensionSurfacePicker,
+  HookLifecycleStepper,
+  testHookConfig,
+  testPickExtensionShape,
+  testSkillFrontmatter
+} from './m08-claude-code-surface';
+
+<ModuleHero
+  kicker="Module 08 · Claude Code extension surface"
+  title="Hooks, skills, plugins, slash commands, subagents"
+  lead="Claude Code is not just a chat UI; it is a platform whose extension surface is wide and deliberately documented. Hooks, skills, plugins, slash commands, subagents, settings.json layering, MCP attach. Most of the productivity wins live here."
+  trackId="interfaces"
+  moduleId="m08"
+/>
+
+<Toc items={[
+  { href: '#shape', label: 'The shape of Claude Code' },
+  { href: '#settings', label: 'settings.json layering' },
+  { href: '#hooks', label: 'Hooks: lifecycle interception' },
+  { href: '#skills', label: 'Skills: prompt-templated capabilities' },
+  { href: '#plugins', label: 'Plugins: bundles' },
+  { href: '#slash', label: 'Slash commands' },
+  { href: '#subagents', label: 'Subagents' },
+  { href: '#mcp-attach', label: 'MCP attachment' },
+  { href: '#permissions', label: 'Permissions and the allowlist' },
+  { href: '#workflow', label: 'Composing your own workflow' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="shape" num={1} title="The shape of Claude Code">
+
+A vanilla Claude Code session is the agent loop you saw in [Module 01](/m/primitives) plus a permission UX. Everything beyond that, file-aware operations, shell access, scheduled hooks, custom commands, MCP-attached tools, is what you bolt on through the extension surface. Knowing the surface lets you turn Claude Code from "an LLM in a terminal" into "the harness that runs your specific work."
+
+The pieces:
+
+- **`settings.json`** is the configuration spine. Layered (global, user, project, project-local) with predictable overrides.
+- **Hooks** intercept lifecycle events with shell commands. Deterministic enforcement.
+- **Skills** are prompt-templated capabilities the model decides to invoke based on description match. Discretionary.
+- **Slash commands** are user-typed shortcuts that expand to templated prompts.
+- **Subagents** are scoped child agents with their own context, tool subset, and system prompt.
+- **Plugins** bundle skills, hooks, slash commands, and agent definitions for distribution.
+- **MCP attachment** brings external tool servers into the session via `.mcp.json`.
+
+The rest of the module walks each one in detail with its config shape, when to use it, and what it looks like in production.
+
+</Section>
+
+<Section id="settings" num={2} title="settings.json layering">
+
+Claude Code reads configuration from multiple `settings.json` files in a predictable order. The layers, from most general to most specific:
+
+1. **Global / system defaults.** Shipped with the install. Rarely edited directly.
+2. **User settings.** `~/.claude/settings.json`. Your personal preferences across all projects: theme, keybindings, default permissions.
+3. **Project settings.** `.claude/settings.json` in the repo root. Checked into git. Project conventions: hooks, allowed tools, MCP attachments.
+4. **Project-local settings.** `.claude/settings.local.json`. Not checked in (in `.gitignore` by convention). Per-machine overrides: secrets, paths, environment-specific tweaks.
+
+Each layer overrides the one above for fields it specifies. Layers do not overwrite entire blocks; they merge. Setting `permissions.allow` in the project file does not erase the `permissions` block from user settings; it merges field by field.
+
+What goes where, in practice:
+
+- **User settings:** preferences only you care about. Status line, theme, default keybindings, your personal Claude Code aliases.
+- **Project settings (committed):** anything your collaborators need too. Hooks that enforce team conventions, allowlist for project-specific tools, MCP attachments the project depends on.
+- **Project-local:** anything machine-specific. API keys, file paths, dev-only flags.
+
+<Callout kind="warn" title="Never commit secrets to project settings.">
+project settings.json gets checked in. .env files, API keys, OAuth secrets all belong in project-local or user settings. The convention to follow: secrets in env vars or in <code>.env</code> files outside settings.json entirely; settings.json holds non-secret configuration only.
+</Callout>
+
+</Section>
+
+<Section id="hooks" num={3} title="Hooks: lifecycle interception">
+
+A <GLink slug="hook-cc">hook</GLink> is a shell command Claude Code runs at a specific lifecycle event. Hooks are deterministic: they fire whether the model wanted them to or not. That is exactly the point.
+
+The events you care about (verify the current list against the docs as Claude Code adds new ones):
+
+- **UserPromptSubmit** fires when the user submits a prompt. Receives the prompt; can mutate or block.
+- **PreToolUse** fires before a tool call executes. Receives tool name and input. Returning a non-zero exit code denies the call.
+- **PostToolUse** fires after a tool call returns. Receives the result. Common place for auto-format, auto-test, audit logging.
+- **Stop** fires when the model emits `end_turn` and the loop exits.
+- **SessionStart** fires when a new session opens.
+- **PreCompact** fires before context compaction. Useful to save state before summarization replaces messages.
+- **Notification** fires on user-facing notifications (permission prompts, alerts).
+
+Hooks attach via `settings.json`:
+
+<CodeBlock lang="json">{`{
+  "hooks": {
+    "PostToolUse": [{
+      "matcher": "Edit|Write",
+      "hooks": [{ "type": "command", "command": "npm test" }]
+    }],
+    "UserPromptSubmit": [{
+      "hooks": [{ "type": "command", "command": "echo \\"$CLAUDE_USER_PROMPT\\" >> ~/.claude/prompts.log" }]
+    }]
+  }
+}`}</CodeBlock>
+
+Common hook recipes:
+
+- **Auto-format on edit.** PostToolUse with matcher `Edit|Write` running `prettier --write` or your formatter.
+- **Auto-test on code change.** PostToolUse with matcher `Edit|Write` running `npm test` (or `pytest`, `cargo test`).
+- **Prompt audit.** UserPromptSubmit appending each prompt to a log file.
+- **Tool denylist.** PreToolUse with matcher pattern, exiting non-zero on the denied tool.
+- **Session telemetry.** SessionStart and Stop logging session start/end times for billing or observability.
+
+### Trace one tool call through the hook lifecycle
+
+<HookLifecycleStepper />
+
+### Sandbox · Build a hooks block
+
+<Sandbox
+  id="m08-hook-config"
+  mode="js"
+  prompt={<>Build the <code>settings.json</code> hooks configuration for two rules: (a) run <code>npm test</code> after every Edit and Write tool call, (b) log every user prompt to a file. Return either the hooks block directly or the full settings object with a top-level <code>hooks</code> key. Required shape: <code>PostToolUse</code> array with one entry whose <code>matcher</code> is exactly <code>"Edit|Write"</code> and whose <code>hooks</code> array contains <code>{'{ type: "command", command: "..." }'}</code> running <code>npm test</code>. <code>UserPromptSubmit</code> array with a hooks entry whose command writes to a log file (use <code>{'>>'}</code>, <code>{'>'}</code>, <code>tee</code>, or similar).</>}
+  starter={`const config = {
+  hooks: {
+    // your code here
+  }
+};
+
+return config;`}
+  test={testHookConfig}
+  hint={<>The shape: <code>{'{ hooks: { PostToolUse: [{ matcher: "Edit|Write", hooks: [{ type: "command", command: "npm test" }] }], UserPromptSubmit: [{ hooks: [{ type: "command", command: "echo ... >> /path/to/log" }] }] } }'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="skills" num={4} title="Skills: prompt-templated capabilities">
+
+A <GLink slug="skill">skill</GLink> is a markdown file with frontmatter declaring its name and description, plus a body containing the prompt template. The model decides when to invoke a skill by matching the user's intent to skill descriptions.
+
+The shape:
+
+<CodeBlock lang="markdown">{`---
+name: review-changes
+description: Use this skill when the user asks Claude to review uncommitted or staged changes in the repo before they commit. Walks the diff, identifies risks, suggests improvements.
+---
+
+You are reviewing uncommitted changes in the current git repo.
+
+1. Run \`git status\` and \`git diff --staged\` to see what is changing.
+2. For each change, identify: what it does, why it might be wrong, what tests would catch a regression.
+3. Output a numbered list of concerns, ordered by risk.
+4. End with a one-sentence summary of whether the changes look ready to commit.`}</CodeBlock>
+
+Two practical rules:
+
+- **The description is a prompt.** It is what the model reads when deciding whether to invoke. Vague descriptions get ignored; precise descriptions get picked. "Use this skill when..." beats "A code review tool."
+- **The body is the actual prompt.** It runs when the skill is invoked. Treat it like any production system prompt: clear instructions, structured steps, explicit output format.
+
+Skills live in three places, by convention:
+
+- `~/.claude/skills/<name>/SKILL.md`: global, available across all projects.
+- `.claude/skills/<name>/SKILL.md`: project-specific, checked into the repo.
+- `.claude/skills/<name>/SKILL.md` (in a plugin): distributed via plugin marketplace.
+
+When a skill beats a slash command: when you want the model to invoke it on its own. When a slash command beats a skill: when the user wants direct control over when it runs. Both can coexist; some teams ship a skill and a slash command pointing to the same prompt body.
+
+### Sandbox · Skill frontmatter for git review
+
+<Sandbox
+  id="m08-skill-frontmatter"
+  mode="js"
+  prompt={<>Build a skill frontmatter object for a <code>git-review-changes</code> skill that should trigger when the user asks Claude to review uncommitted or staged changes. Required: <code>name</code> (string clearly identifying the skill, must include "git" and "review" because the model uses both keywords to find it), <code>description</code> (string of at least 40 characters mentioning "review" and referencing uncommitted/staged changes or the working tree). The model picks skills by description match, so pretend a real model reads it.</>}
+  starter={`const frontmatter = {
+  // your code here
+};
+
+return frontmatter;`}
+  test={testSkillFrontmatter}
+  hint={<>A description like <em>"Review uncommitted changes in the current git working tree, walk the diff, identify risks before commit"</em> hits all the keywords without padding. Skill descriptions are prompts, not docs.</>}
+/>
+
+</Section>
+
+<Section id="plugins" num={5} title="Plugins: bundles of skills, hooks, slash commands">
+
+A plugin is a directory containing a `.claude-plugin/plugin.json` manifest plus the skills, hooks, slash commands, and agent definitions it bundles. Marketplaces (separate directories with their own `.claude-plugin/marketplace.json` index) catalog one or more plugins for installation. Install via the `/plugin` slash command from a marketplace or a local path.
+
+A simplified plugin.json:
+
+<CodeBlock lang="json">{`// .claude-plugin/plugin.json
+{
+  "name": "code-review-pack",
+  "version": "1.0.0",
+  "description": "A plugin bundling review-changes, security-review, and pre-commit hooks."
+}`}</CodeBlock>
+
+Skills, slash commands, hooks, and subagents live in their conventional locations within the plugin directory (the same paths the plugin would have used at the project level: `skills/`, `commands/`, `agents/`, plus a `hooks/` config). The manifest names and versions the plugin; the contents live alongside it.
+
+The use case for plugins is *distribution*: when you want to share a coherent extension package across projects or with collaborators, packaging as a plugin saves everyone from copying files manually. If you have one project's worth of skills, just commit them to `.claude/skills/`; if you have a reusable toolkit, plugin.
+
+Mihailo's openclaw-clay-coach skill pack is the canonical example of when a plugin earns its keep: a coherent set of skills, hooks, and reference material around a specific workflow, distributed once, installable in any project.
+
+</Section>
+
+<Section id="slash" num={6} title="Slash commands">
+
+A slash command is a markdown file in `.claude/commands/<name>.md` (or globally in `~/.claude/commands/`). The body is a prompt template that expands when the user types `/<name>` in the session.
+
+The shape:
+
+<CodeBlock lang="markdown">{`---
+description: Run a security audit on the staging branch
+---
+
+You are running a security audit. Steps:
+
+1. Check out the staging branch.
+2. Run \`git diff main..staging\` to see all changes.
+3. For each file changed, scan for: hardcoded secrets, SQL string concatenation, missing input validation, dangerous library updates.
+4. Output a structured report.`}</CodeBlock>
+
+Slash command vs skill, the cheap distinction:
+
+- **User invokes a slash command.** They type `/security` and the prompt expands. Direct control.
+- **Model invokes a skill.** It reads descriptions, picks a relevant skill, runs it. Discretionary.
+
+When to use a slash command: when the user always knows when they want this. When to use a skill: when the user describes intent and the model should pick. Some workflows ship both pointing to the same prompt body.
+
+A few naming conventions worth keeping:
+
+- Lowercase kebab-case: `/review-pr`, not `/ReviewPR`.
+- Action-shaped names: `/deploy`, `/audit`, `/fix-tests`. Verbs, not nouns.
+- Avoid two-character commands except for very common operations: `/r` saves keystrokes but loses discoverability.
+
+</Section>
+
+<Section id="subagents" num={7} title="Subagents">
+
+A <GLink slug="subagent-cc">subagent</GLink> is a scoped child agent the main loop spawns from the Agent tool. The parent passes a prompt; the subagent runs its own loop with its own context, optional tool subset, and own system prompt; returns a single summary back to the parent.
+
+Definitions live in `.claude/agents/<name>.md` (or `~/.claude/agents/` globally). The shape:
+
+<CodeBlock lang="markdown">{`---
+name: deep-research
+description: Use for deep research questions that span multiple sources and require careful synthesis. Returns a structured research summary.
+tools: [WebSearch, WebFetch, Read]
+model: opus
+---
+
+You are a research subagent. Your job is to answer one question thoroughly using web search, web fetch, and reading any provided context.
+
+Output a structured summary with:
+- The question
+- Sources consulted (with URLs)
+- Findings, ordered by confidence
+- Open questions that need follow-up`}</CodeBlock>
+
+Fields that matter:
+
+- **`name`** (required). The identifier the parent uses when spawning.
+- **`description`** (required). The model reads this to decide whether to spawn this subagent.
+- **`tools`** (optional). Restricts the subagent's tool set. Omitted means inherit the parent's tools.
+- **`model`** (optional). Override the model for the subagent. Common pattern: parent on Sonnet, deep-research subagent on Opus.
+
+When subagents win:
+
+- **Context isolation.** A research task that would dump 50K tokens of intermediate findings into the parent's context burns the parent's budget. The subagent does the burning, returns a 1K summary.
+- **Specialization.** A test-writing subagent has a different system prompt from a code-editing subagent. Specializing improves performance on each.
+- **Parallelism.** Spawn three subagents (research, test, refactor) in parallel; the parent waits for all three. Faster wall time than serial.
+
+When subagents cost more than they save:
+
+- **Trivial tasks.** Spawning a subagent for "format this date" is two extra API round trips and zero value.
+- **Tightly coupled tasks.** When the parent needs the subagent's full intermediate state to make decisions, the summary-only return is the wrong shape.
+- **Context-fitting tasks.** When the work fits in the parent's context naturally, isolation is unnecessary overhead.
+
+</Section>
+
+<Section id="mcp-attach" num={8} title="MCP attachment in Claude Code">
+
+`.mcp.json` lives in the project root and declares which MCP servers attach when the session starts. Format:
+
+<CodeBlock lang="json">{`{
+  "mcpServers": {
+    "potter": {
+      "command": "node",
+      "args": ["/path/to/potter/dist/mcp-server.js"]
+    },
+    "crm-tools": {
+      "type": "http",
+      "url": "https://mcp.your-vendor.example.com/v1?key=..."
+    }
+  }
+}`}</CodeBlock>
+
+The two transports show up here. `command` plus `args` is stdio: Claude Code spawns the subprocess. `type: "http"` plus `url` is streamable HTTP: Claude Code connects to a hosted server.
+
+Lifecycle:
+
+1. Session opens; Claude Code spawns or connects to each MCP server in `.mcp.json`.
+2. Each server is sent `initialize`, `tools/list`. Tools merge into the session registry.
+3. The model sees these tools alongside Claude Code's built-ins.
+4. Tool calls route to the right server based on tool name; results come back as tool_result.
+5. Session ends; Claude Code shuts down each MCP subprocess.
+
+Troubleshoot with `claude mcp list` to verify which servers are attached. If a server appears in `.mcp.json` but not in `claude mcp list`, the spawn or handshake failed. Common causes: wrong path, server missing dependencies, incompatible MCP protocol version.
+
+<Callout kind="note" title="Project-local .mcp.json belongs in the repo (mostly).">
+The MCP server list defines the project's tool dependencies and is part of the reproducible setup. Commit it. Exception: if any field contains a secret (API key in the URL), put that part in <code>.mcp.local.json</code> or pull it from an env var instead.
+</Callout>
+
+</Section>
+
+<Section id="permissions" num={9} title="Permissions and the allowlist">
+
+Claude Code asks for approval before running a tool that could affect the world. The default is per-tool prompts; you can allowlist tools that should run without asking.
+
+Allowlist via `settings.json`:
+
+<CodeBlock lang="json">{`{
+  "permissions": {
+    "allow": [
+      "Bash(npm test)",
+      "Bash(git status)",
+      "Bash(git diff:*)",
+      "Read",
+      "Glob",
+      "Grep"
+    ],
+    "deny": [
+      "Bash(rm -rf:*)",
+      "Bash(sudo:*)"
+    ]
+  }
+}`}</CodeBlock>
+
+Patterns to follow:
+
+- **Allowlist read-only and search-shaped tools.** Read, Grep, Glob, list-files, and any specific Bash commands you trust (`npm test`, `git status`).
+- **Gate writes and network calls.** Edit, Write, Bash(any), WebFetch, anything that mutates state or talks to external systems.
+- **Deny obviously dangerous patterns.** `Bash(rm -rf:*)`, `Bash(sudo:*)`, and any other patterns whose blast radius is large enough that even an explicit user approval is risky.
+- **Project-specific overrides in project settings.** A repo where tests are safe to auto-run can allowlist `Bash(npm test)`; a repo where tests fire emails to customers cannot.
+
+`/permissions` in-session adjusts the allowlist for the current session. Useful for "I am about to do a lot of git operations, allow them all for the next hour."
+
+`--dangerously-skip-permissions` flags exist (under various names across versions) to disable the gate entirely. Use only for experimentation, never in shared environments, and never for sessions that touch shared state.
+
+</Section>
+
+<Section id="workflow" num={10} title="Composing your own Claude Code workflow">
+
+The pieces are independent on purpose. A real workflow uses several of them together. One worked example: a "review-then-merge" workflow.
+
+The pieces:
+
+- **Skill: `review-changes`.** Triggers when the user asks Claude to review staged changes. Body walks the diff, lists risks, ends with a ready-or-not verdict.
+- **Slash command: `/merge`.** Expands to a templated prompt: "Run review-changes, then if the review verdict is ready, merge to main."
+- **Hook: PostToolUse on Edit|Write.** Auto-runs `npm test` after every code change so the review skill is reading clean diffs.
+- **Subagent: `security-review`.** Specialized for security-sensitive changes. The main agent spawns it when the diff touches auth, payments, or user-data code.
+- **MCP attach: a code-search MCP.** Brings in cross-repo search for context the model would not otherwise have.
+
+The user types `/merge`. The prompt template runs. Claude reads the diff, invokes the `review-changes` skill, optionally spawns the `security-review` subagent on sensitive changes, runs `npm test` (auto via hook), and decides whether to merge based on the synthesis. The user gets one decision point ("merge or not") instead of five separate prompts.
+
+The lesson: extension shapes compose. Hooks enforce; skills opt in; slash commands let users invoke; subagents scope; plugins distribute; MCP brings in cross-harness tools. A workflow that uses the right shape for each job becomes much smaller than one that hammers everything into the same shape.
+
+### Demo · Pick the right extension shape
+
+<ExtensionSurfacePicker />
+
+### Sandbox · Pick the extension shape
+
+<Sandbox
+  id="m08-pick-extension-shape"
+  mode="js"
+  prompt={<>Implement <code>pick(need)</code> returning one of <code>"hook"</code>, <code>"skill"</code>, <code>"slash"</code>, <code>"subagent"</code>, <code>"plugin"</code>, <code>"mcp"</code>. Mappings: <code>"enforce-rule-on-every-tool-call"</code> returns <code>"hook"</code>; <code>"prompt-templated-capability-model-invokes"</code> returns <code>"skill"</code>; <code>"user-typed-shortcut-to-prompt"</code> returns <code>"slash"</code>; <code>"long-running-scoped-task"</code> returns <code>"subagent"</code>; <code>"bundle-skills-and-hooks-for-distribution"</code> returns <code>"plugin"</code>; <code>"tool-callable-from-many-harnesses"</code> returns <code>"mcp"</code>. Default for unknown kinds: <code>"skill"</code>.</>}
+  starter={`function pick(need) {
+  // your code here
+}
+
+return pick;`}
+  test={testPickExtensionShape}
+  hint={<>Object map plus fallback. The defaults that hold: hooks for unconditional, skills for model-invoked, slash for user-invoked, subagent for context isolation, plugin for distribution, MCP for cross-harness.</>}
+/>
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter as a Claude Code attachment</h3>
+
+    <p>Potter wires into Claude Code via <code>.mcp.json</code>. Once attached, Claude Code's session has roughly 25 Potter tools available to the model alongside the built-ins (Read, Write, Bash, etc). The model picks among them by description; the harness routes tool_use calls over MCP to the Potter subprocess; Potter executes against Proxycurl, Apify, Firecrawl, or Stagehand and returns the result.</p>
+
+    <p>The clean separation is what makes this work. Claude Code is the harness with the full extension surface this module covered. Potter is the tool provider, intentionally minimal, intentionally portable. Add a hook here, a skill there, a subagent over there: that is Claude Code surface. Add a tool that any harness can call: that is MCP. Same workflow, different shapes, no overlap.</p>
+
+    <p>This is also why Potter's own openclaw-clay-coach lives as a Claude Code <em>plugin</em> rather than as part of the Potter MCP. The plugin distributes the workflow conventions for using Clay (skills, slash commands, hooks); the Potter MCP distributes the tools. Different layers, different distribution shapes.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-settings-json" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">settings.json</p><p className="text-sm text-ink-700">Claude Code's configuration file. Layered: global, user, project, project-local.</p></div>
+  <div id="glossary-hook-cc" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">hook</p><p className="text-sm text-ink-700">Shell command Claude Code runs at a lifecycle event (e.g. before a tool call).</p></div>
+  <div id="glossary-skill" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">skill</p><p className="text-sm text-ink-700">Prompt-templated capability defined by a markdown file with frontmatter. The model decides when to invoke it.</p></div>
+  <div id="glossary-slash-command" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">slash command</p><p className="text-sm text-ink-700">User-typed shortcut that expands to a templated prompt.</p></div>
+  <div id="glossary-subagent-cc" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">subagent</p><p className="text-sm text-ink-700">A scoped agent the main loop spawns with its own context, tool set, and system prompt.</p></div>
+  <div id="glossary-plugin-cc" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">plugin</p><p className="text-sm text-ink-700">Bundle of skills, hooks, slash commands, and tools distributed as a directory.</p></div>
+  <div id="glossary-mcp-json" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">.mcp.json</p><p className="text-sm text-ink-700">Claude Code's per-project MCP server configuration.</p></div>
+  <div id="glossary-permission-allowlist" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">permission allowlist</p><p className="text-sm text-ink-700">Tools auto-approved for execution without prompting the user.</p></div>
+  <div id="glossary-user-prompt-submit" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">UserPromptSubmit</p><p className="text-sm text-ink-700">Hook event firing when the user submits a prompt. Receives the prompt, can mutate or block.</p></div>
+  <div id="glossary-pre-tool-use" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">PreToolUse</p><p className="text-sm text-ink-700">Hook event firing before a tool call executes. Can deny.</p></div>
+  <div id="glossary-post-tool-use" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">PostToolUse</p><p className="text-sm text-ink-700">Hook event firing after a tool call returns. Receives the result.</p></div>
+  <div id="glossary-agents-dir" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">/.claude/agents</p><p className="text-sm text-ink-700">Where subagent definitions live. One markdown file per subagent.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m08-q1" question="1. What is the difference between a skill and a slash command?">
+Skills are model-invoked: the model reads skill descriptions and picks one when the user's intent matches. Slash commands are user-typed: the user types /name and the prompt expands. Skills are discretionary; slash commands are direct. Some workflows ship both pointing to the same prompt body to give users either path.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q2" question="2. When does a hook beat a skill?">
+When the rule must run unconditionally on every event. Hooks are deterministic: they fire whether the model wanted them to or not. Use a hook for "lint runs after every code edit" or "log every prompt"; use a skill for "review the staging branch when the user asks." Skills depend on the model deciding to invoke them; hooks do not.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q3" question="3. Three good uses for PostToolUse?">
+Auto-format on edit (run prettier/black after Edit|Write), auto-test on code change (run npm test or pytest after edits), audit logging (append every tool result to a session log). Anything you want to happen reliably whenever a tool finishes belongs in PostToolUse.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q4" question="4. Subagent vs main agent: what is the cost trade?">
+Subagents isolate context (cheaper per-turn for the parent because intermediate findings stay in the child) at the cost of an extra API round trip per spawn and a separate decision boundary. Worth it for tasks that would otherwise dump large intermediate state into the parent's context. Not worth it for trivial tasks or tasks tightly coupled to the parent's reasoning.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q5" question="5. Why does .mcp.json belong with the project, not in user settings?">
+Different projects need different MCP servers. A research project needs Potter; a customer-support project needs Zendesk MCP; a CRM project needs HubSpot MCP. Project-local config keeps the dependency graph reproducible: anyone cloning the repo gets the right MCP servers. User settings are personal preferences; project tool dependencies are project state.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q6" question="6. A team wants enforced lint on every code edit. Hook or skill?">
+Hook on PostToolUse with matcher Edit|Write running the linter. Hooks fire deterministically; skills depend on the model deciding to invoke. Enforcement is the deterministic case, so it goes in a hook. A skill could explain the lint output, but the running of the linter is hook work.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q7" question="7. When should you write a plugin vs raw hooks plus skills?">
+When the bundle would be reused across three or more projects or shared with collaborators. Plugins are about distribution: the plugin.json manifest plus a marketplace listing is overhead, justified when you save someone the work of copying files manually. One project's worth of conventions: just commit them. A reusable toolkit: plugin.
+</CheckQuestion>
+
+<CheckQuestion id="m08-q8" question="8. What is wrong with allowlist-everything?">
+Removes the permission model's safety net. A misbehaving tool, a prompt-injection attack, or a model hallucinating a destructive command can run without a chance to block. Allowlist read-only and search-shaped operations (Read, Grep, Glob, specific safe Bash commands like git status). Gate writes, network calls, and anything with cost or blast radius.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the full Claude Code surface. The next module is the alternative path: managed agent platforms that abstract the loop entirely.
+
+<CompleteBanner moduleId="m08" nextSlug="managed-platforms" nextTitle="Module 09 · Managed agent platforms" />
+
+</Section>
+
+<ModuleNav prevSlug="harnesses" prevTitle="Module 07 · Harnesses" nextSlug="managed-platforms" nextTitle="Module 09 · Managed agent platforms" />

@@ -1,0 +1,406 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  DecodingDemo,
+  ProviderComparison,
+  testDecodeStrategies,
+  testLatencyBudget,
+  testPickProvider
+} from './m02-inference';
+
+<ModuleHero
+  kicker="Module 02 · Inference"
+  title="What actually happens when you call the model"
+  lead="An LLM call is a forward pass through a frozen pile of weights. Everything you tune at the API level (model, temperature, top_p, max_tokens, streaming) is a thin wrapper over that one mechanic. Knowing what is happening underneath is the difference between guessing and engineering."
+  trackId="foundations"
+  moduleId="m02"
+/>
+
+<Toc items={[
+  { href: '#what-inference-is', label: 'What inference actually is' },
+  { href: '#decoding', label: 'Decoding the next token' },
+  { href: '#temperature', label: 'Why temperature changes the output' },
+  { href: '#providers', label: 'Inference providers' },
+  { href: '#latency', label: 'Latency anatomy' },
+  { href: '#cost', label: 'Cost economics' },
+  { href: '#local', label: 'Local inference' },
+  { href: '#reasoning', label: 'Reasoning vs vanilla' },
+  { href: '#not-inference', label: 'What inference does not do' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-inference-is" num={1} title="What inference actually is">
+
+[Module 01](/m/primitives) covered the surface: messages in, response out, the agent loop wrapped around it. This module is one layer down. Every line of that loop sits on top of one mechanical operation: a *forward pass* through a trained neural network. That pass is what people mean when they say "inference."
+
+Two things are worth separating. **Training** is the offline process that shapes the weights of a model. It runs once (or once per checkpoint), takes weeks to months on thousands of accelerators, and produces a static file. **Inference** is the runtime act of using that file. Every API call you make is one trip through the network, with no learning, no weight updates, no memory. You pay for inference per call. You pay for training once, and you usually pay someone else (Anthropic, OpenAI, Meta) to do it.
+
+The shape of one inference call is straightforward. You feed in a sequence of token IDs (the input). The model runs each token through an embedding layer, then through a stack of transformer layers (Opus and Sonnet have many tens of layers; smaller models fewer). At the last layer, the network produces <GLink slug="logits">logits</GLink>: one raw score for every token in the vocabulary, representing how likely that token is to come next. A softmax turns those logits into a probability distribution. A <GLink slug="decoding">decoding</GLink> rule picks one. That picked token gets appended to the input, and the whole thing runs again to produce the next one. Streaming is just sending each picked token to the client as soon as it pops out, instead of waiting for the whole sequence.
+
+<Mermaid chart={`flowchart LR
+  T["input tokens"] --> E["embeddings"]
+  E --> L1["transformer<br/>layer 1"]
+  L1 --> L2["..."]
+  L2 --> LN["transformer<br/>layer N"]
+  LN --> H["hidden state<br/>at last position"]
+  H --> O["logits over<br/>full vocabulary"]
+  O --> D["decoding rule"]
+  D --> NT["next token"]
+  NT -.->|append, run again| T`} />
+
+<p className="text-sm text-ink-500">One forward pass produces one next token. Generation is a loop over forward passes.</p>
+
+Three properties of this pass matter for everything else in the course:
+
+- **Frozen weights.** The model file does not change between your calls. Two users hitting the same model at the same time are running the same code over the same numbers, with different inputs.
+- **Stateless per call.** The network has no memory of previous requests. Whatever the model "knows" about your conversation is in the input you fed it this turn. Same point [Module 01](/m/primitives#what-is-llm) made about the API; now you know it is true at the silicon level too, not just the HTTP level.
+- **Deterministic at temperature zero, except when it is not.** Given identical input, identical sampling rule, and a temperature of zero, the network will produce the same logits every time. In practice you also depend on batch composition, GPU non-determinism, and model versioning. Treat reproducibility as best-effort.
+
+That is the whole shape. The rest of this module is what you can change about it from the API.
+
+</Section>
+
+<Section id="decoding" num={2} title="Decoding the next token">
+
+The model emits a probability distribution over its entire vocabulary on every step. Modern Claude models have a vocabulary in the hundreds of thousands of tokens. Your decoding rule is the function that takes that distribution and picks one.
+
+Four rules cover almost everything in production:
+
+- **Greedy.** Pick the highest-probability token every time. Deterministic, often repetitive on long generations because the model can fall into "the the the" type loops. Fine for one-shot answers, awful for long-form text.
+- **Temperature sampling.** Scale the distribution by a temperature parameter, then sample. Lower T peaks the distribution; higher T flattens it. Default for most chat APIs.
+- **Top-k.** Only consider the k highest-probability tokens, then sample from those. Hard cutoff. Throws away too much when the distribution is genuinely flat and keeps too much when it is sharp.
+- **Top-p (nucleus).** Only consider tokens whose cumulative probability reaches p, then sample from those. Adapts to the shape of the distribution. Beats top-k on almost every benchmark and is the default in most production systems. The original paper is Holtzman et al., 2019.
+
+A small JavaScript implementation of top-p:
+
+<CodeBlock lang="js">{`function topP(probs, p) {
+  // probs is an array of [token, probability] pairs, sorted descending.
+  let cumulative = 0;
+  const nucleus = [];
+  for (const [token, prob] of probs) {
+    nucleus.push([token, prob]);
+    cumulative += prob;
+    if (cumulative >= p) break;
+  }
+  return nucleus;
+  // Caller renormalizes the truncated array and samples from it.
+}`}</CodeBlock>
+
+The Anthropic API exposes both `temperature` and `top_p`. You almost always set one and leave the other alone. The default for most production agent code is `temperature: 0` (or very low) for tool selection and structured output, with `top_p` left at its default. For creative work, raise temperature.
+
+### Demo · Decoding Strategy Visualizer
+
+Same probability distribution, different rules. Click the buttons. Top-p and temperature sampling are randomized, so click a few times to see the variance.
+
+<DecodingDemo />
+
+### Sandbox · Implement greedy and top-p
+
+Now write the rules yourself. Return an object with two functions: `pickGreedy(probs)` returning the single highest-probability token, and `pickTopP(probs, p)` returning the truncated array whose cumulative probability reaches at least `p`.
+
+<Sandbox
+  id="m02-decode-strategies"
+  mode="js"
+  prompt={<>You are implementing the two decoding rules a real inference stack uses on every generated token. The input <code>probs</code> is an array of <code>[token, probability]</code> pairs already sorted descending, like <code>{'[["Paris", 0.62], ["a", 0.10], ["Lyon", 0.06]]'}</code>. <code>pickGreedy(probs)</code> returns the single highest-probability token (the string, not the pair). <code>pickGreedy([])</code> should return <code>undefined</code> or <code>null</code> without throwing. <code>pickTopP(probs, p)</code> returns the truncated array of pairs whose cumulative probability first reaches at least <code>p</code>; if the first token already crosses the threshold, return an array of length one. <code>pickTopP([], 0.9)</code> returns <code>[]</code>.</>}
+  starter={`function pickGreedy(probs) {
+  // your code here
+}
+
+function pickTopP(probs, p) {
+  // your code here
+}
+
+return { pickGreedy, pickTopP };`}
+  test={testDecodeStrategies}
+  hint={<>Greedy is just <code>probs[0]?.[0]</code>. For top-p, walk the sorted array, accumulate the probability, and break the moment cumulative reaches <code>p</code>. Use <code>Array.prototype.push</code> rather than slicing so the empty-input case naturally returns <code>[]</code>.</>}
+/>
+
+</Section>
+
+<Section id="temperature" num={3} title="Why temperature changes the same prompt's output">
+
+Temperature is one number. It scales the logits before the softmax, which changes the shape of the distribution. The effect is mechanical:
+
+<CodeBlock lang="js">{`function softmaxWithTemp(logits, T) {
+  const scaled = logits.map(x => x / T);     // T < 1 sharpens, T > 1 flattens
+  const max = Math.max(...scaled);
+  const exps = scaled.map(x => Math.exp(x - max));
+  const sum = exps.reduce((a, b) => a + b, 0);
+  return exps.map(x => x / sum);
+}`}</CodeBlock>
+
+At `T = 1.0`, you get the model's native distribution. At `T = 0.2`, the highest-probability token grows much more dominant; the long tail gets squeezed close to zero. At `T = 0`, the API treats this as "always pick the top token" (most providers special-case this; some sample from a near-zero T which is functionally the same).
+
+The practical consequence is the one [Module 01](/m/primitives#sampling) called out: same input does not produce the same output above zero. For agent design that matters because the model picks tools the same way it picks any other token. Above `T = 0` your harness can call the same situation and get a different tool, a different argument, or a different ordering of parallel calls. For production tool selection, pin temperature to zero. For one-off creative writing, raise it.
+
+<Callout kind="warn" title="Zero is not perfectly reproducible.">
+Even at <code>temperature: 0</code>, identical output is not guaranteed across model versions, batched inference, GPU non-determinism, or ties in the top-1 score. Treat reproducibility as best-effort. Eval suites should assume some variance and test for ranges, not equalities. Module 16 goes deeper on evaluation strategy.
+</Callout>
+
+</Section>
+
+<Section id="providers" num={4} title="Inference providers">
+
+You almost never run inference yourself in production. Someone runs the GPUs for you and exposes an API. The market has split into a few archetypes, each optimizing for a different thing.
+
+- **Anthropic.** Frontier-quality Claude models, focused on agentic and tool-using tasks. Three live tiers (Opus 4.7, Sonnet 4.6, Haiku 4.5). Opus 4.7 ships adaptive thinking; Sonnet 4.6 and Haiku 4.5 expose extended-thinking blocks. Opus 4.7 and Sonnet 4.6 default to 1M-token context; Haiku 4.5 is 200K. The default for everything else in this course.
+- **OpenAI.** Frontier-quality GPT and o-series models. Comparable tier; different quirks on tool use, JSON output, and reasoning. Image generation lives here too.
+- **Together AI.** Hosted open-weights catalog (Llama, Qwen, DeepSeek, Mistral). You get a wide choice of open-source models without running them yourself, often at a fraction of frontier pricing.
+- **Fireworks AI.** Similar shape to Together with strong fine-tuning support. If you want a fine-tuned open-weights model and do not want to manage the training loop, this is the box.
+- **Groq.** Custom hardware (LPUs) optimized for very high tokens-per-second on smaller open-weights models. The latency-first option. Voice agents and real-time UIs reach for it; verify their current numbers on the status page because the marketing pitch updates more often than the throughput.
+- **Self-hosted (vLLM, llama.cpp).** You run the GPUs. vLLM is the production-grade serving stack; llama.cpp is the everywhere-it-fits laptop runtime. You take on the operational burden in exchange for full control.
+
+Picking a provider is a decision tree, not a tier list:
+
+1. **Does the task require frontier reasoning quality?** Anthropic or OpenAI. Most agent work falls here.
+2. **Is latency the dominant constraint?** Groq, or a small Anthropic model (Haiku) if you also need frontier quality.
+3. **Is cost the dominant constraint at high volume?** Together or Fireworks on open-weights. Or Anthropic batch tier if you can tolerate hours of latency.
+4. **Are you forbidden from sending data outside?** Self-hosted on vLLM or a cloud you control.
+5. **Default if none of the above bites?** Anthropic.
+
+### Demo · Provider Comparison
+
+Step through six provider archetypes. Each one notes its model selection, typical TTFT and throughput, pricing shape, and the niche where it wins.
+
+<ProviderComparison />
+
+### Sandbox · Pick a provider
+
+Implement `pickProvider(task)` returning the right provider name for a task shape.
+
+<Sandbox
+  id="m02-pick-provider"
+  mode="js"
+  prompt={<>The task object has a <code>kind</code> field. Implement the mapping: <code>"low-latency"</code> returns <code>"groq"</code>, <code>"frontier-quality"</code> returns <code>"anthropic"</code>, <code>"high-throughput-batch"</code> returns <code>"anthropic-batch"</code>, <code>"self-hosted-required"</code> returns <code>"vllm"</code>, <code>"open-weights-cheap"</code> returns <code>"together"</code>. Anything else (including unknown kinds) falls back to <code>"anthropic"</code>: when you do not know what the task wants, pick the safe default.</>}
+  starter={`function pickProvider(task) {
+  // your code here
+}
+
+return pickProvider;`}
+  test={testPickProvider}
+  hint={<>An object map plus a fallback is the cleanest shape: <code>{'const map = { "low-latency": "groq", ... }; return map[task.kind] ?? "anthropic";'}</code></>}
+/>
+
+</Section>
+
+<Section id="latency" num={5} title="Latency anatomy: time to first token vs throughput">
+
+Latency on an LLM call is two numbers, not one. **TTFT** (time to first token) is the wall time between submitting the request and the first generated token arriving. **Throughput** is the tokens-per-second rate during decoding. These are governed by different mechanics and bottleneck on different things.
+
+TTFT is dominated by **prefill**: the phase where the input tokens are run through the network in a batch before generation begins. Long input means more prefill compute. A 50K-token system prompt on its own can add hundreds of milliseconds to a couple of seconds of TTFT depending on the provider. Streaming does not save you from prefill; it just means the first user-visible token arrives the moment prefill finishes.
+
+Throughput is the **decode** phase: the model generating one token, then the next, then the next. It is roughly independent of input length. A long generation on a fast model still streams at the same tokens per second whether your input is 200 tokens or 200,000.
+
+The practical formulation that matters for budgeting:
+
+<CodeBlock lang="js">{`// rough back-of-envelope; real numbers come from the provider's status page
+const ttftMs = (inputTokens / 1000) * ttftMsPerKToken;     // prefill
+const decodeMs = (outputTokens / decodeTokPerSec) * 1000;  // decode
+const totalMs = ttftMs + decodeMs;`}</CodeBlock>
+
+Two consequences fall out of that formula. First, long inputs hurt user-perceived latency disproportionately because the user sees nothing until prefill completes. Caching the prefix (covered in [Module 01](/m/primitives#context-window) and again in [Module 17](/m/cost-economics)) is the main way to attack this; cached input skips most of prefill. Second, long outputs do not hurt TTFT but they extend total wall time. If your agent has to produce a 4000-token plan before any tool call, you are committing to the full decode budget regardless of how good your prompt is.
+
+<Callout kind="note" title="Provider numbers shift constantly.">
+Specific TTFT and throughput numbers age fast. Anthropic, OpenAI, and Groq all publish status pages and benchmark notes; treat any number you read in a course or blog post as approximate and verify on the day you build the budget.
+</Callout>
+
+### Sandbox · Estimate latency
+
+Implement `estimateLatency` so a planner can answer "is this within my latency budget" before sending a request.
+
+<Sandbox
+  id="m02-latency-budget"
+  mode="js"
+  prompt={<>Compose TTFT and decode into a single ms total. <code>estimateLatency({"{ inputTokens, outputTokens, ttftMsPerKToken, decodeTokPerSec }"})</code> returns total milliseconds. Formula: <code>(inputTokens / 1000) * ttftMsPerKToken</code> plus <code>(outputTokens / decodeTokPerSec) * 1000</code>. The verifier passes four cases including zero input and zero output, which should return <code>0</code> without any special-casing.</>}
+  starter={`function estimateLatency({ inputTokens, outputTokens, ttftMsPerKToken, decodeTokPerSec }) {
+  // your code here
+}
+
+return estimateLatency;`}
+  test={testLatencyBudget}
+  hint={<>Two terms summed: <code>(inputTokens / 1000) * ttftMsPerKToken</code> for prefill and <code>(outputTokens / decodeTokPerSec) * 1000</code> for decode. The zero case falls out for free.</>}
+/>
+
+</Section>
+
+<Section id="cost" num={6} title="Cost economics at the inference level">
+
+Inference is priced per token. Almost every provider quotes two rates: one for prompt (input) tokens, one for completion (output) tokens. Output is usually three to five times more expensive than input on frontier models because decode is the harder phase computationally.
+
+A few patterns recur across providers and matter for budgeting:
+
+- **Cached input is much cheaper than fresh input.** Anthropic and most other major providers offer prompt caching with discounts in the range of 80 to 90 percent on cached prefix reads. For an agent loop where the system prompt and tool definitions repeat on every iteration, this is the single biggest cost lever.
+- **Batch APIs trade latency for cost.** Anthropic's batch API (and OpenAI's equivalent) processes requests asynchronously over hours, with roughly half-price token rates. If you are doing nightly enrichment on 10,000 leads and do not need a response in seconds, batch wins.
+- **Smaller models cost much less per token.** Haiku is roughly an order of magnitude cheaper than Opus on equivalent token counts. For tasks that do not need frontier reasoning (simple classification, format conversion, short summaries), routing to a cheaper model is often a 5x to 10x cost cut at acceptable quality.
+- **Per-call fixed overhead is rare but real.** Some hosted endpoints have a small fixed cost per request. For very high volumes this matters; for normal workloads it is in the noise.
+
+Rough budgeting math: a single agent loop that runs 20 turns with a 5K-token system prompt and 1K tokens of tool results per turn sends roughly 20 * (5000 + 1000) = 120K input tokens to the provider. Without caching, you pay full price on 120K input tokens. With prompt caching, the 5K system prompt portion is cached after the first call, so you pay full price on 5K input tokens once, then cached-rate on roughly 100K tokens, then full rate on the remaining 1K-per-turn tool results. The savings compound.
+
+[Module 17](/m/cost-economics) goes much deeper on this, including model routing strategies, when to batch, and how to think about durable products built on inference. The point of mentioning cost here is that it is not separable from inference. Every API decision (model, caching, streaming, batch) is a cost decision in disguise.
+
+</Section>
+
+<Section id="local" num={7} title="Local inference: running models on your hardware">
+
+Frontier models are gated behind APIs because they are too large and expensive to run on a laptop. Open-weights models are not. You can download Llama, Qwen, DeepSeek, Gemma, or any number of others and run them on hardware you own. The category name for this is **local inference**, and the tooling has matured enough to be genuinely usable.
+
+Three runtimes cover almost the entire space:
+
+- **Ollama.** The easiest entry point. One CLI command, one model name, runs against a local HTTP API. Good for trying open-weights models on a laptop, prototyping, and small internal tools.
+- **LM Studio.** Desktop app with a chat UI, a local server toggle, and a model browser. Often the right call when a non-developer on the team needs to play with open-weights models.
+- **llama.cpp.** The library underneath most of the above. C++ runtime that can use GPU, CPU, or both, with extreme effort spent on quantization. If you want fine-grained control over how a model fits on your specific hardware, this is the layer to drop down to.
+
+Why people do this:
+
+- **Privacy or compliance.** Data cannot leave your network. Certain regulated workloads (healthcare, defense, on-prem enterprise) effectively require it.
+- **Offline.** Models that work without internet, on a plane, in the field. Coding assistants on a flight; field inspection apps; air-gapped laptops.
+- **Cost at very high volume.** If you are running millions of cheap classification calls a day and a smaller open-weights model is good enough, running it yourself can beat any hosted API on per-token cost.
+- **Research and fine-tuning.** Local runs on small models are how you iterate on training, quantization, and architectural experiments.
+
+Why most people should not, for production agent quality:
+
+- **The frontier gap is real.** Open-weights models in 2026 are good. Frontier models are still measurably better on tool use, long-context attention, and complex multi-step reasoning. For a research agent that has to coordinate fifteen tool calls and synthesize the results, frontier still wins on most benchmarks.
+- **Operational burden.** Inference is a serving problem. You need GPU capacity, autoscaling, warm pools, model loading, and failover. Hosted providers handle all of this; you do not.
+- **Latency is unpredictable.** A laptop running a 70B model in 4-bit quantization is slow and gets slower under load. Production user-facing agents need consistent TTFT, which is hard to guarantee on consumer hardware.
+
+The honest framing: local inference is a real, useful, sometimes-correct option, but it is not the default. Use it when one of the four reasons above pushes you to it, not because hosted feels expensive on a single test call.
+
+[Module 20](/m/open-source-models) is the deep version of this section, including specific model recommendations, quantization tradeoffs, and how Hugging Face fits in. This module is the lay-of-the-land.
+
+</Section>
+
+<Section id="reasoning" num={8} title="Reasoning models: thinking before answering">
+
+A standard model produces an answer immediately: input goes in, output comes out, all visible to you. A **reasoning model** does something different. Before producing the visible answer, it generates a hidden chain of thought (also called "thinking" tokens) that the user does not see, but that the model itself attends to when it composes the final answer.
+
+The two production families to know:
+
+- **Claude with extended or adaptive thinking.** Anthropic exposes a `thinking` content block on supported models. Sonnet 4.6 and Haiku 4.5 use extended thinking: you opt in by setting a thinking budget, and the response comes back with one or more thinking blocks before the visible text or tool_use blocks. Opus 4.7 uses adaptive thinking, where the model itself decides how much to think per turn rather than asking you for an explicit budget. Either way, the harness can choose whether to surface the thinking trace or hide it.
+- **OpenAI o-series.** A separate model family from GPT-x; the reasoning happens inside the model and is not surfaced to the API consumer at all on most variants. You see the final answer; the thinking is implicit and billed.
+- **Gemini Thinking.** Google's equivalent. Same general shape.
+
+The cost of reasoning is straightforward: more tokens. A reasoning model burning 5,000 thinking tokens before producing a 200-token answer costs as if it produced a 5,200-token answer. Latency goes up correspondingly because all that thinking happens inside the same generation phase.
+
+The benefit is also straightforward, on the right tasks. Reasoning models reliably win on:
+
+- **Hard math and step-by-step calculation.** Problems where one wrong intermediate step cascades.
+- **Multi-step planning where order matters.** Software architecture trade-offs, complex routing decisions, anything where the model needs to consider three options and rule two out.
+- **Debugging.** Reading a stack trace, hypothesizing causes, narrowing the search space.
+- **Hard instruction-following with many constraints.** When the prompt has ten rules and the answer has to satisfy all of them simultaneously, the extra thinking budget pays off.
+
+When reasoning models hurt:
+
+- **Easy or short tasks.** A reasoning model burning 3,000 tokens to format a date string is wasted budget. The non-reasoning answer was already correct.
+- **Latency-sensitive paths.** Streaming UIs that need the first user-visible token in under a second cannot afford ten seconds of upstream thinking.
+- **Strict structured output.** Reasoning sometimes drifts the model away from the strict JSON or schema it was supposed to produce. Module 12 covers structured output strategy and when reasoning helps versus hurts.
+- **High-volume cheap calls.** When you are sending a million calls a day, the per-call markup of reasoning compounds into a real budget hit.
+
+The decision rule is the obvious one. Reasoning is a tool, not a default. Reach for it when the task is hard enough to justify the markup, and reach for the non-reasoning model when it is not.
+
+</Section>
+
+<Section id="not-inference" num={9} title="What inference does not do">
+
+A short section by intention. The mistakes worth avoiding cluster around three claims people repeat without checking.
+
+**The model does not learn from your calls.** Every API request is a forward pass through frozen weights. The weights do not change. There is no online learning, no fine-tuning happening behind the scenes on your data, no signal flowing back from your response to anyone else's. Whatever any provider does with your data for training future model versions is a separate, contractual question, governed by their terms of service. The runtime call does not learn.
+
+**The model does not remember you between calls.** "Remember" is a UX feature your harness implements by storing conversation history and resending it. ChatGPT's memory feature, Claude's project memory, every "the agent that learned from me" pitch: all harness-side, all stored somewhere on the application's side, all sent back into the prompt the next time you talk to it. The model itself is a stateless function: same weights, same input, same logits, no recollection.
+
+**One user's calls do not affect another user's experience.** Two API users hitting the same model at the same time are running independent forward passes through the same weights. Nothing leaks across requests. (If you are sharing API keys or session storage that is a different problem, on you, not the model.)
+
+The combination matters because most of the wishful thinking about agents assumes some of these are false. They are not. The model is a fast, frozen function that takes a list of tokens in and produces a list of tokens out. Everything that looks like learning, memory, or personalization is something your harness built around it.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">How Potter relates to inference</h3>
+
+    <p>Potter never trains anything. Every Potter MCP call is exactly one forward pass per provider per tool, and almost none of those forward passes happen inside Potter itself. The provider routing inside Potter (Proxycurl, Apify, Firecrawl, Stagehand) is about <em>data sources</em>, not about model selection. The harness above Potter decides which model to use; Potter does the data work.</p>
+
+    <p>The one place inference shows up inside Potter is <code>potter_browser_act</code>, the browser-action tool that calls Claude (or another model) to drive a Stagehand session one action at a time. That is a deliberately scoped LLM call: it runs a small loop inside the tool, against a single page, with a tight context. Everywhere else in Potter the boundary is rigid. Tools take inputs, return outputs, do not call models. The harness owns inference; Potter owns extraction.</p>
+
+    <p>The reason this separation is intentional is the same reason it shows up in the architecture diagrams in [Module 01](/m/primitives#potter-angle). It lets you swap which model your harness uses without touching Potter, lets you swap data providers without touching the model, and gives you one place to debug latency and cost. If a Potter run is slow, the bottleneck is one of: a tool's data provider (slow Proxycurl call, slow Firecrawl crawl), the model that picked the tool (the harness's inference call), or your network. You can answer "which" by looking at the timestamps; you cannot if those layers are tangled.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-inference" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">inference</p><p className="text-sm text-ink-700">The runtime act of using a trained model. Each call is one forward pass through frozen weights.</p></div>
+  <div id="glossary-forward-pass" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">forward pass</p><p className="text-sm text-ink-700">A single trip of input through every layer of the network, producing output logits.</p></div>
+  <div id="glossary-decoding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">decoding</p><p className="text-sm text-ink-700">The rule for picking the next token from the model's output probability distribution.</p></div>
+  <div id="glossary-greedy-decoding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">greedy decoding</p><p className="text-sm text-ink-700">Pick the highest-probability token at every step. Deterministic, often repetitive on long generations.</p></div>
+  <div id="glossary-top-p" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">top-p (nucleus)</p><p className="text-sm text-ink-700">Sampling rule that only considers tokens whose cumulative probability reaches p. Adapts to the shape of the distribution.</p></div>
+  <div id="glossary-top-k" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">top-k</p><p className="text-sm text-ink-700">Sampling rule that only considers the k highest-probability tokens. Hard cutoff regardless of the distribution shape.</p></div>
+  <div id="glossary-logits" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">logits</p><p className="text-sm text-ink-700">Pre-softmax raw scores the model produces for each vocabulary token. Logits feed into the decoding rule.</p></div>
+  <div id="glossary-ttft" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">TTFT</p><p className="text-sm text-ink-700">Time to first token. The wall time between request submission and the first generated token arriving.</p></div>
+  <div id="glossary-throughput" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">throughput</p><p className="text-sm text-ink-700">Tokens per second during decoding. Independent of how long the input is.</p></div>
+  <div id="glossary-prefill" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">prefill</p><p className="text-sm text-ink-700">The phase where input tokens are processed in a batch before generation starts. Dominates TTFT on long inputs.</p></div>
+  <div id="glossary-inference-provider" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">inference provider</p><p className="text-sm text-ink-700">A company or piece of software that runs inference for you. Anthropic, OpenAI, Groq, Together, vLLM.</p></div>
+  <div id="glossary-batch-api" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">batch API</p><p className="text-sm text-ink-700">An API tier that processes requests asynchronously at lower cost and longer latency. Roughly half-price on Anthropic and OpenAI.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+Answer in your own words before clicking each prompt.
+
+<CheckQuestion id="m02-q1" question="1. Why is training not part of inference, and what does that mean for your API calls?">
+Training shapes the model's weights once, offline, on enormous compute. Inference uses those frozen weights at runtime, one forward pass per call. The two are separate systems. For your API calls it means nothing learns from anything you send: the weights are identical between any two calls, your data does not leak into another user's experience through the model, and the only memory in the system is whatever your harness puts back into the input.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q2" question="2. What does temperature actually scale, and what is the visible effect on output?">
+Temperature scales the logits before they go through softmax. Dividing logits by a temperature less than 1 sharpens the distribution (the top token grows much more probable, the long tail shrinks); dividing by a temperature greater than 1 flattens it. Visibly, low temperature makes the model produce the same kind of token reliably (good for tool selection, structured output, deterministic flows); high temperature increases variety (good for brainstorming, creative writing, ideation).
+</CheckQuestion>
+
+<CheckQuestion id="m02-q3" question="3. Why does top-p (nucleus sampling) often beat top-k?">
+Top-k uses a fixed cutoff regardless of the distribution shape. When the distribution is genuinely peaky (one token has 80 percent), top-k keeps too many low-probability options. When the distribution is flat (all tokens roughly equal), top-k keeps too few. Top-p adapts: it sets the cutoff by cumulative probability, so a peaky distribution naturally returns one or two tokens and a flat distribution returns many. Same parameter, right behavior in both cases.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q4" question="4. TTFT vs throughput: which one does long input hurt, and which one does long output hurt?">
+Long input hurts TTFT. Prefill is the phase where input tokens are batched through the network before generation begins, and prefill compute scales with input length. Long output does not hurt TTFT (the first token still arrives after the same prefill), but it extends total wall time because decode happens token by token at the model's throughput rate. Caching the prefix is the main lever against TTFT; routing to a cheaper, faster model is the main lever against throughput.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q5" question="5. When does local inference (Ollama, LM Studio, vLLM) actually win over a frontier API?">
+Four cases: privacy or compliance constraints that forbid sending data outside, offline scenarios where the network is not available, very high volume of cheap calls where per-token economics flip in favor of self-hosting, and research or fine-tuning workflows where you need control over the model file. Almost everywhere else, the frontier gap on tool use, long-context attention, and complex reasoning makes hosted APIs the better default. Local is a real option, not the default.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q6" question="6. What is a reasoning model and what does it cost you?">
+A reasoning model emits a hidden chain of thought (Claude extended-thinking or adaptive-thinking blocks, OpenAI o-series internal reasoning) before producing the visible answer. The thinking tokens are billed and counted toward latency, even though the harness can hide them from the user. The cost is more tokens spent and more wall-clock time per call. The benefit is measurably better performance on hard math, multi-step planning, debugging, and complex constraint-following. Reach for it when the task is hard enough to justify the markup; do not use it for trivial calls.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q7" question="7. Why does prompt caching exist at the inference layer, and how big is the win in a typical agent loop?">
+Prefill is the expensive part of a long-input call. Caching the prefix (system prompt, tool definitions, anything that does not change between calls) lets the provider skip re-running it through the network for repeat calls. The cached read is roughly 80 to 90 percent cheaper than fresh input on Anthropic, with a TTL of around 5 minutes refreshed on each hit. In an agent loop with a 5K-token system prompt over 20 turns, that converts roughly 100K of repeated input into cached reads, which is the biggest single cost lever in agent budgeting.
+</CheckQuestion>
+
+<CheckQuestion id="m02-q8" question='8. A user claims "the agent learned from talking to me." What is actually happening?'>
+The harness is storing conversation context (and possibly summaries, embeddings, or extracted facts) and resending it into the prompt the next time the user talks to the model. The model itself does not change. Its weights are identical between calls. No call modifies any other user's experience, and no information flows from the model's perspective from one session to the next. "The agent learned" is a UX framing built by the harness storing and replaying state, not a property of the underlying inference.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You now know what happens between your API call and the response: a forward pass, a decoding rule, and one provider's hardware. The next module returns to the agent layer, where you compose those calls into patterns.
+
+<CompleteBanner moduleId="m02" nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />
+
+</Section>
+
+<ModuleNav prevSlug="primitives" prevTitle="Module 01 · Primitives" nextSlug="agent-patterns" nextTitle="Module 03 · Agent patterns" />

@@ -1,0 +1,356 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  MemoryBucketsDemo,
+  RagPipelineDemo,
+  testChunkDocument,
+  testPickMemory
+} from './m11-memory-retrieval';
+
+<ModuleHero
+  kicker="Module 11 · Memory and retrieval"
+  title="Three buckets, not one"
+  lead="Three kinds of memory matter for agents: working (the current conversation), episodic (past sessions), and semantic (knowledge base). Most products conflate them. Most agent failures trace to the wrong kind."
+  trackId="building"
+  moduleId="m11"
+/>
+
+<Toc items={[
+  { href: '#three-buckets', label: 'Three kinds of memory' },
+  { href: '#working', label: 'Working memory' },
+  { href: '#episodic', label: 'Episodic memory' },
+  { href: '#semantic', label: 'Semantic memory' },
+  { href: '#embeddings', label: 'Embedding models' },
+  { href: '#vector-stores', label: 'Vector store options' },
+  { href: '#retrieval', label: 'Retrieval patterns' },
+  { href: '#summarize-vs-retrieve', label: 'When summarization beats retrieval' },
+  { href: '#memory-file', label: "Anthropic's memory file API" },
+  { href: '#fine-tuning', label: 'The fine-tuning question' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="three-buckets" num={1} title="Three kinds of memory">
+
+[Module 01](/m/primitives) said the API is stateless. Any feeling that the agent "remembers" you is the harness storing context and resending it. Engineering memory is the work of choosing *what* to store, *when* to retrieve, and *how* to inject. The three buckets that map cleanly onto agent design:
+
+- **<GLink slug="working-memory">Working memory</GLink>:** the current conversation. Lives in the messages array of one session. The model attends to all of it on every turn.
+- **<GLink slug="episodic-memory">Episodic memory</GLink>:** past sessions. Records you keep across conversations, scoped to a user, retrieved when relevant.
+- **<GLink slug="semantic-memory">Semantic memory</GLink>:** a knowledge base. Documents the agent looks up on demand, separate from any specific user.
+
+Each has different storage, different retrieval, different lifetime. Most agent failures trace to using the wrong bucket: stuffing an entire knowledge base into working memory, or treating per-user preferences as semantic facts, or trying to summarize when retrieval would have worked.
+
+<MemoryBucketsDemo />
+
+</Section>
+
+<Section id="working" num={2} title="Working memory: keeping the conversation in budget">
+
+Working memory is what fits in the messages array right now. The cap is the context window: 1M tokens on Opus 4.7 and Sonnet 4.6 by default; 200K on Haiku 4.5 ([Module 01](/m/primitives#context-window)).
+
+Three failure modes show up in production:
+
+- **Context exhaustion.** A 50-iteration agent loop with 5K-token tool results per turn hits 250K of context fast. The API rejects the next call.
+- **Attention dilution.** Long context dilutes the model's attention. Even if the request fits, the relevant information competes with everything else, and recall degrades.
+- **Cost compound.** Long messages arrays mean expensive prefill on every turn. Without prompt caching, the cost compounds linearly with length.
+
+The mitigations:
+
+- **<GLink slug="context-compaction">Context compaction</GLink>.** Replace earlier turns with a summary. Most production harnesses (including Claude Code) do this automatically when you cross a threshold.
+- **Subagents.** A sub-task that would dump 30K tokens of intermediate findings into the parent's context can run in a subagent that returns one summary back ([Module 03](/m/agent-patterns)).
+- **Structured tool outputs.** Tools that return targeted JSON instead of huge prose dumps keep context tight ([Module 10](/m/tool-design)).
+- **Prompt caching.** Cache the prefix (system prompt, tool definitions) so prefill cost stays bounded even as messages grow ([Module 02](/m/inference#cost)).
+
+The discipline: treat the messages array as a budget. Every turn, ask "what is in here that the model needs for the next decision?" Anything that does not pass that test should be summarized, dropped, or moved to a different memory bucket.
+
+</Section>
+
+<Section id="episodic" num={3} title="Episodic memory: past sessions">
+
+Episodic memory is the record of past sessions: what the user asked last week, what the agent did, what the user liked or disliked. Per-user, time-stamped, queryable.
+
+A reasonable schema:
+
+<CodeBlock lang="ts">{`interface EpisodicRecord {
+  id: string;
+  user_id: string;
+  timestamp: Date;
+  summary: string;          // 1-3 sentences
+  references: string[];     // session IDs, doc URLs, etc
+  tags?: string[];          // optional, for filtering
+}`}</CodeBlock>
+
+Retrieval patterns:
+
+- **By time range.** "What did we talk about last week?" Filter by user_id and timestamp window. Cheapest, no embeddings needed.
+- **By similarity.** "Find past sessions related to billing." Embed the query; retrieve top-K by similarity over the summary field.
+- **By tag.** Pre-tagged categories ("billing", "feature-request", "bug-report") for direct filtering without similarity.
+
+The trap most teams fall into: dumping every past message verbatim into the prompt. A user with 100 sessions of 20 messages each becomes 100 * 20 = 2000 messages, way over budget, mostly irrelevant, killing recall on the few relevant ones. The fix: summary-per-session as the indexed unit, not raw messages. Retrieve summaries; fetch full transcripts only when explicitly needed.
+
+</Section>
+
+<Section id="semantic" num={4} title="Semantic memory: the knowledge base">
+
+Semantic memory is the agent's knowledge base: documents, articles, manuals, transcripts, anything the agent should be able to answer from. Separate from any one user. The classic <GLink slug="rag">RAG</GLink> (Retrieval-Augmented Generation) pipeline.
+
+The pipeline, end to end:
+
+<RagPipelineDemo />
+
+A practical sketch in code:
+
+<CodeBlock lang="ts">{`// One-time, offline (or batch when documents change):
+for (const doc of documents) {
+  const chunks = chunkText(doc.content, { maxChars: 800, overlapChars: 100 });
+  for (const chunk of chunks) {
+    const embedding = await embed(chunk);
+    await vectorStore.upsert({ id: hash(chunk), embedding, metadata: { docId: doc.id, chunk } });
+  }
+}
+
+// Per query, online:
+const queryEmbedding = await embed(userQuery);
+const candidates = await vectorStore.query(queryEmbedding, { topK: 20 });
+const reranked = await rerank(userQuery, candidates, { topN: 5 });
+
+const prompt = \`Use the following context to answer:
+
+\${reranked.map((r, i) => \`[\${i + 1}] \${r.chunk}\`).join('\\n\\n')}
+
+Question: \${userQuery}\`;`}</CodeBlock>
+
+The decisions that matter most for retrieval quality:
+
+- **Chunk size.** Too big and retrieval drags in irrelevant text; too small and chunks lose context. 500 to 1000 characters with 50 to 200 character overlap is a reasonable starting point. Tune based on document type.
+- **Embedding model.** Voyage and Cohere lead on retrieval-tuned embeddings; OpenAI text-embedding-3 is the safe default; sentence-transformers (open-source) for self-hosting. Pick by cost, latency, and dimension count.
+- **Top-K and reranking.** Retrieve more than you need (top 20), then rerank for precision (top 5). The reranker is cheaper than asking the model to attend to 20 mediocre chunks.
+
+### Sandbox · Chunk a document with overlap
+
+<Sandbox
+  id="m11-chunk-document"
+  mode="js"
+  prompt={<>Implement <code>chunkText(text, {"{ maxChars, overlapChars }"})</code> returning an array of strings. Each chunk must be at most <code>maxChars</code> long. Adjacent chunks must share exactly <code>overlapChars</code> characters at the boundary (the last <code>overlapChars</code> of chunk N equals the first <code>overlapChars</code> of chunk N+1). Empty input returns <code>[]</code>. Short text fitting in one chunk returns <code>[text]</code>. The verifier covers all three cases plus a 250-char input at maxChars=100, overlap=20.</>}
+  starter={`function chunkText(text, { maxChars, overlapChars }) {
+  // your code here
+}
+
+return chunkText;`}
+  test={testChunkDocument}
+  hint={<>Stride is <code>maxChars - overlapChars</code>. Walk the string in increments of stride; slice <code>[start, start + maxChars]</code>; stop when start exceeds text length. Empty string returns [] without entering the loop.</>}
+/>
+
+</Section>
+
+<Section id="embeddings" num={5} title="Embedding models">
+
+The embedding model converts a chunk of text into a vector. Different models produce different vectors; you cannot mix vectors from one model with vectors from another in the same index. Pick once, commit.
+
+The 2026 lineup, roughly:
+
+- **Voyage AI.** Retrieval-tuned embeddings; generally the strongest on RAG-shaped benchmarks. Hosted API. Reasonable pricing.
+- **Cohere Embed.** Multilingual, retrieval-tuned. Hosted API. Often paired with Cohere's reranker.
+- **OpenAI text-embedding-3-large / -small.** Mature, widely supported. text-embedding-3-large is the default for many production stacks; -small for cost-sensitive workloads.
+- **Anthropic.** As of 2026, Anthropic does not ship first-party embeddings. Use a peer (Voyage is the common pairing) for the embedding step in an Anthropic-driven stack.
+- **Sentence-transformers (open-source).** Run locally. all-MiniLM-L6-v2 is the canonical small model; larger MTEB-leaderboard variants compete with hosted APIs at higher compute cost.
+
+Trade-offs:
+
+- **Quality vs cost.** Larger models recall better; cost more per token; produce higher-dimension vectors that take more storage.
+- **Quality vs latency.** Higher-quality models often have higher per-call latency. Acceptable for offline indexing; matters for query-time embedding.
+- **Lock-in.** Once your index has 10M vectors from one model, re-embedding to switch is non-trivial. Pick something stable.
+
+</Section>
+
+<Section id="vector-stores" num={6} title="Vector store options">
+
+The database that holds embeddings and answers similarity queries. Common options:
+
+- **Pinecone.** Hosted, managed, scales to billions of vectors with low operational overhead. The default for "we want a vector store and do not want to think about it." Pricing per index plus per query.
+- **Weaviate.** Open-source plus hosted. Strong on hybrid search (keyword + vector) and on schema-rich indexes.
+- **Qdrant.** Open-source plus hosted. Performance-focused, growing fast.
+- **Chroma.** Lightweight, embeddable, popular for prototypes. Less production-grade at scale than the above.
+- **pgvector.** Postgres extension. The right call when you already have Postgres and your scale fits in it. Avoids adding a new system to your stack.
+- **In-memory and file-based options.** For very small corpora (under a few thousand chunks), naive in-memory cosine search is fine and operationally trivial.
+
+Picking a default:
+
+- Already have Postgres and under ~10M chunks: pgvector.
+- Want hosted with minimal ops: Pinecone.
+- Open-source preference: Weaviate or Qdrant.
+- Prototype: Chroma in-process.
+
+The pricing-tier comparison shifts every few months; verify on the day you commit, not based on a course mention.
+
+</Section>
+
+<Section id="retrieval" num={7} title="Retrieval patterns">
+
+Top-K cosine similarity is the basic shape, but the patterns that matter for production quality:
+
+- **Top-K with scores.** Always return scores alongside results. The agent (or a reranker) can use the score distribution to decide how many results are worth including.
+- **<GLink slug="reranking">Reranking</GLink>.** Pass top-K through a small dedicated reranker model (Cohere Rerank, Voyage Rerank). Improves precision dramatically; typically 200ms to 500ms latency.
+- **<GLink slug="hybrid-search">Hybrid search</GLink>.** Combine vector similarity with keyword (BM25) search. Vector misses rare terms (product names, error codes); keyword misses semantic similarity. Hybrid catches both.
+- **Filters.** Most vector stores support metadata filters: "search only chunks tagged 'billing' from the last 30 days." Use them to narrow before similarity, not after.
+- **Multi-query.** For complex questions, generate 2-3 variant queries with the model, retrieve top-K for each, deduplicate, rerank. Improves recall on ambiguous questions.
+
+</Section>
+
+<Section id="summarize-vs-retrieve" num={8} title="When summarization beats retrieval">
+
+Retrieval has overhead: chunking, embedding, indexing, query-time embedding, vector lookup, optional reranking. When the data is small enough that the whole thing fits in the prompt after summarization, retrieval just adds latency without quality.
+
+The rule of thumb:
+
+- **Small enough to summarize once and inject:** under ~10K tokens after summarization. Skip RAG; one summary in the prompt.
+- **Too big for that, structured enough to query:** 10K to billions of tokens. RAG.
+- **Truly enormous and unstructured:** beyond practical RAG. Aggressive pre-processing, summarization layers, hierarchical retrieval (retrieve documents first, then chunks within them).
+
+Specific examples where summary wins:
+
+- A user has 5 past sessions, average 2K tokens each. Summarize each to 100 tokens; inject all 5 summaries (500 tokens total). No vector store needed.
+- A 30-page PDF you need the agent to know about. Summarize once to 1K tokens; include in system prompt. Update the summary when the doc changes.
+- 10 product docs, total 50K tokens of source. Hierarchical: summarize each doc to 300 tokens; inject the 10 summaries; let the model ask for the full text of any specific doc via a tool.
+
+The point is not "RAG bad." It is "RAG when retrieval saves more than it costs." For small corpora, the overhead of an indexing pipeline is the cost; for large corpora, the cost of injecting everything is the cost.
+
+### Sandbox · Pick the memory shape
+
+<Sandbox
+  id="m11-pick-memory"
+  mode="js"
+  prompt={<>Implement <code>pickMemoryShape(useCase)</code> returning <code>"working"</code>, <code>"episodic"</code>, <code>"semantic"</code>, or <code>"summary"</code>. Mappings: <code>"continue-this-turns-reasoning"</code> -&gt; <code>"working"</code>; <code>"remember-user-preferences-across-sessions"</code> -&gt; <code>"episodic"</code>; <code>"answer-from-large-knowledge-base"</code> -&gt; <code>"semantic"</code>; <code>"compress-long-doc-into-paragraph"</code> -&gt; <code>"summary"</code>; <code>"recall-past-meetings-with-user"</code> -&gt; <code>"episodic"</code>; <code>"lookup-product-docs-on-the-fly"</code> -&gt; <code>"semantic"</code>. Default for unknown kinds: <code>"working"</code>.</>}
+  starter={`function pickMemoryShape(useCase) {
+  // your code here
+}
+
+return pickMemoryShape;`}
+  test={testPickMemory}
+  hint={<>Object map plus fallback. Episodic is per-user across sessions; semantic is a corpus the agent queries; summary is compress-once-and-inject; working is the current conversation by default.</>}
+/>
+
+</Section>
+
+<Section id="memory-file" num={9} title="Anthropic's memory tool">
+
+Anthropic ships a first-party <GLink slug="memory-file">memory tool</GLink> on supported models. The shape: the model gets a set of file-system-style commands (`view`, `create`, `str_replace`, `insert`, `delete`, `rename`) over a `/memories/` directory. Storage is **client-side**: your app implements the read and write handlers; the API just teaches the model how to use them. The persistence is yours to provide; the protocol is Anthropic's.
+
+When to use it:
+
+- Cross-session continuity that is naturally text-shaped: facts the agent learned about the user, preferences, ongoing context, scratch notes the model wants to consult later.
+- Small to medium-sized state expressed as files in a directory. The mental model is "the agent has a notebook"; not "the agent has a database."
+- Anthropic-aligned stack where you want the model to drive the persistence shape without you imposing a schema.
+
+When to roll your own:
+
+- Structured records with typed fields you want enforced server-side.
+- Multi-tenant systems where storage isolation per user is load-bearing (you still implement that yourself even with the memory tool, but a roll-your-own database may map more naturally to your auth model).
+- Queries beyond file-system-style get and replace.
+- Provider-portable code that should not depend on the Anthropic-specific tool surface.
+
+The cost story is the standard tool-use roundtrip: each memory operation is a tool_use plus tool_result, billed as input and output tokens like any other tool. Verify limits when you commit. The framing matches any managed feature: convenient and opinionated, with a migration cost if you outgrow the opinion.
+
+</Section>
+
+<Section id="fine-tuning" num={10} title="The fine-tuning question">
+
+Every memory and retrieval discussion eventually surfaces fine-tuning. The honest framing:
+
+- **Fine-tune for style and format.** Where you want the model to consistently produce a specific tone, output structure, or domain idiom. Examples: legal writing style, internal jargon, structured output formats your stack expects.
+- **RAG for facts.** Where you want the model to know specific information that updates over time or is too large to fit in any prompt. Examples: product docs, customer history, knowledge bases.
+
+If you are tempted to fine-tune for facts, you almost certainly want RAG. Fine-tuned facts decay (the world changes faster than you re-train); RAG facts stay fresh because the source is the source. Fine-tuning costs five-figure-and-up training runs; RAG costs the same as inference.
+
+The exception is genuine domain adaptation: medical, legal, or scientific text where the base model's vocabulary is too generic. Even then, do RAG first. If RAG quality is acceptable, you do not need fine-tuning. If it is not, fine-tune the base model on style and combine with RAG for facts.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter has no memory</h3>
+
+    <p>Potter's MCP tools are stateless. Each call sends input, gets a result, keeps no record. Memory belongs to the harness layer above Potter, not to Potter itself. Claude Code remembers conversations; n8n workflows pass state explicitly; Mihailo's standalone Potter CLI carries its own session memory if needed.</p>
+
+    <p>This is by design. A memory-bearing tool layer would couple Potter to specific harness implementations and break the portability the rest of this course has been building toward. The three-bucket framework (working, episodic, semantic) applies to whatever harness is consuming Potter, not to Potter itself.</p>
+
+    <p>The deliberate exception is the same one as everywhere else: <code>potter_browser_act</code> carries a tiny working memory inside one tool call (the screenshots and decisions it makes during a browser session). That memory is scoped to one tool invocation and discarded when it returns. The principle holds: tools are stateless across invocations; memory is the harness's job.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-working-memory" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">working memory</p><p className="text-sm text-ink-700">The current conversation's context. Lives in the messages array of one session.</p></div>
+  <div id="glossary-episodic-memory" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">episodic memory</p><p className="text-sm text-ink-700">Records of past sessions, persisted, retrievable by user or time.</p></div>
+  <div id="glossary-semantic-memory" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">semantic memory</p><p className="text-sm text-ink-700">A knowledge base of facts or documents the agent retrieves from on demand.</p></div>
+  <div id="glossary-rag" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">RAG</p><p className="text-sm text-ink-700">Retrieval-Augmented Generation. The pattern of retrieving relevant documents and injecting them into the prompt.</p></div>
+  <div id="glossary-chunking" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">chunking</p><p className="text-sm text-ink-700">Splitting documents into smaller pieces for embedding and retrieval.</p></div>
+  <div id="glossary-embedding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">embedding</p><p className="text-sm text-ink-700">A vector representation of text used for semantic similarity.</p></div>
+  <div id="glossary-vector-store" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">vector store</p><p className="text-sm text-ink-700">A database optimized for similarity search over embeddings.</p></div>
+  <div id="glossary-reranking" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">reranking</p><p className="text-sm text-ink-700">A second-pass scoring of retrieved candidates by a (often smaller) model.</p></div>
+  <div id="glossary-hybrid-search" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">hybrid search</p><p className="text-sm text-ink-700">Combining keyword (BM25) and vector similarity for retrieval.</p></div>
+  <div id="glossary-context-compaction" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context compaction</p><p className="text-sm text-ink-700">Replacing earlier conversation turns with a summary to free working memory.</p></div>
+  <div id="glossary-memory-file" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">memory tool</p><p className="text-sm text-ink-700">Anthropic's first-party memory primitive: file-system-style commands (view, create, str_replace, insert, delete, rename) over a /memories/ directory; storage is client-side.</p></div>
+  <div id="glossary-fine-tuning" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">fine-tuning</p><p className="text-sm text-ink-700">Updating model weights on your data. Rarely beats RAG for agents.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m11-q1" question='1. An LLM call is stateless. So what does "the agent remembered me" actually mean?'>
+The harness stored context (or retrieved past records) and resent it as part of the prompt. The model itself does not retain anything between calls; weights are frozen and the API is stateless. "Memory" is always harness-side: a database of past sessions, a vector store of documents, a summary file. Any agent that "remembers" you is the product of explicit storage and retrieval the harness implemented.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q2" question="2. When does summarization beat retrieval?">
+When the data is small enough to fit in context after summarization. RAG has overhead (chunking, embedding, indexing, query-time lookup, optional reranking) that is wasted when one summary in the prompt would have done it. Rule of thumb: under ~10K tokens after summarization, summarize once and inject. Above that, RAG.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q3" question="3. What does chunking do and why is overlap needed?">
+Chunking splits documents into smaller pieces for embedding and retrieval. Overlap means adjacent chunks share a few hundred characters at the boundary, so a fact that lands at the edge of one chunk is still recoverable from the next chunk. Without overlap, a sentence split across the boundary is invisible to retrieval.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q4" question="4. When is hybrid search (keyword + vector) worth it?">
+When the corpus has rare keywords that vectors miss (product names, error codes, internal jargon) but you also need semantic recall for natural-language queries. Vector alone misses exact-match terms; keyword alone misses paraphrased queries. Hybrid catches both at modest extra cost.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q5" question="5. Reranking adds latency. When does it pay off?">
+When top-K retrieval has good recall but mediocre precision: you are pulling the right answer in the top 20 but it is mixed with 19 distractors. The reranker is a small model that scores candidates more precisely, often reducing top-K from 20 to 5 with much higher quality. Typical cost is 200ms to 500ms; usually worth it for accuracy-sensitive RAG.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q6" question="6. Anthropic's memory tool: when use it vs roll your own?">
+Use it for cross-session continuity that is naturally text-shaped: facts learned about the user, preferences, ongoing context, scratch notes the model wants to consult later. Anthropic-aligned stack where the integration matters more than provider portability. Note that storage is client-side: you implement the read/write handlers, the API just teaches the model the file-system-style commands. Roll your own when you have structured records that need server-enforced typing, queries beyond view/create/str_replace, or provider-portable requirements.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q7" question="7. Fine-tuning vs RAG: heuristic?">
+Fine-tune for style and format (consistent tone, structured output, domain idiom). RAG for facts (specific information that updates over time or is too large for any prompt). If you are tempted to fine-tune for facts, you almost certainly want RAG: fine-tuned facts decay, RAG facts stay fresh because the source is the source.
+</CheckQuestion>
+
+<CheckQuestion id="m11-q8" question="8. Why does Potter not store memory?">
+Tool layers should be stateless across invocations. Memory belongs to the harness above the tool. Coupling memory to tools breaks portability across harnesses: a Potter that stored sessions would have to know which user is which, which session is which, and how to scope storage, all of which are harness concerns. The clean separation lets Potter work in any MCP-speaking harness without configuration.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the three-bucket framework and the RAG pipeline. The next module is the other side of getting useful information out of a model: structured output that parses cleanly.
+
+<CompleteBanner moduleId="m11" nextSlug="structured-output" nextTitle="Module 12 · Structured output" />
+
+</Section>
+
+<ModuleNav prevSlug="tool-design" prevTitle="Module 10 · Tool design at scale" nextSlug="structured-output" nextTitle="Module 12 · Structured output" />

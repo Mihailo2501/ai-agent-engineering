@@ -1,0 +1,346 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  MigrationStepper,
+  PlatformMatrix,
+  testFeatureMatrix,
+  testPickPlatform
+} from './m09-managed-platforms';
+
+<ModuleHero
+  kicker="Module 09 · Managed agent platforms"
+  title="When to buy the loop instead of building it"
+  lead="Claude Agent SDK, OpenAI Agent Builder, Google Agentspace, Vercel AI SDK. The vendors are racing to abstract away the agent loop. Knowing what each takes care of for you, what each forces on you, and what lock-in each carries is the difference between shipping fast and rebuilding in six months."
+  trackId="interfaces"
+  moduleId="m09"
+/>
+
+<Toc items={[
+  { href: '#what-managed', label: 'What "managed" actually means' },
+  { href: '#claude-agent-sdk', label: 'Claude Agent SDK' },
+  { href: '#openai-agent-builder', label: 'OpenAI Agent Builder' },
+  { href: '#google-agentspace', label: 'Google Agentspace' },
+  { href: '#vercel-ai-sdk', label: 'Vercel AI SDK' },
+  { href: '#matrix', label: 'Side-by-side feature matrix' },
+  { href: '#lock-in', label: 'Lock-in dimensions' },
+  { href: '#build-vs-buy', label: 'Build vs buy heuristics' },
+  { href: '#migrating', label: 'Migrating off a managed platform' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-managed" num={1} title='What "managed" actually means'>
+
+[Module 07](/m/harnesses) was about handcrafted harnesses: Claude Code, Codex, Cursor, n8n, your own 50-line script. This module is the alternative path. A <GLink slug="managed-platform">managed agent platform</GLink> runs the loop *for you*. You hand it tools, prompts, and configuration; it returns sessions, evals, deployment, and observability.
+
+What the platform takes care of, on average:
+
+- **The loop itself.** No while-stop_reason loop in your code. The platform calls the API, dispatches tools, persists state.
+- **Hosted state.** Sessions, threads, memory, conversation history, often persisted on the vendor's infrastructure.
+- **Evals.** Built-in golden-test runners, regression suites, sometimes LLM-as-judge tooling.
+- **Observability.** Dashboards for latency, cost, failure modes, success rates, eval scores. Plug in your own only if you outgrow theirs.
+- **Deployment.** Hosted runtimes for the agent itself, often with auto-scaling and built-in rate limiting.
+- **Multi-user and access control.** When the platform is the runtime, IAM is its problem, not yours.
+
+What you can no longer change:
+
+- **The loop's exact shape.** If the platform's loop does not stream the way you need, or batches differently, or has a hidden retry policy, you do not have a knob.
+- **Hidden defaults.** Platforms apply prompt-shape munging, tool-output reformatting, retry policies, fallback models. Often invisible until something behaves unexpectedly.
+- **Storage formats.** Your eval data, session logs, audit trails are in the platform's format. Migration cost is real.
+
+The honest framing: managed platforms make standard shapes very fast and non-standard shapes painful. Pick deliberately.
+
+</Section>
+
+<Section id="claude-agent-sdk" num={2} title="Claude Agent SDK">
+
+Anthropic's first-party SDK for building agents on top of the Claude API. Sits a layer above the basic `@anthropic-ai/sdk`: it gives you the agent class, tools API, hooks, memory primitives, and deployment helpers without forcing a hosted runtime.
+
+What it bundles:
+
+- **Agent class.** A typed wrapper around the loop. You define system prompt, tools, hooks; the agent runs.
+- **Tools API.** Tool definitions are typed; tool implementations are typed; tool errors propagate as typed errors.
+- **Hooks.** Lifecycle interceptors (similar to Claude Code hooks at a different layer): before-call, after-call, on-tool-use, on-error.
+- **Memory primitives.** Hooks for short-term and long-term memory, with optional Anthropic-managed storage.
+- **Deployment.** Run the agent on your own infrastructure; the SDK does not require a hosted runtime.
+
+What it does not give you out of the box: a UI (you build that on top), a visual builder (Anthropic does not ship one as of 2026), full observability dashboards (integrate with your own).
+
+When Claude Agent SDK wins:
+
+- You are committed to Anthropic and want first-party Claude features (extended thinking, prompt caching, tool design at scale) integrated into the agent runtime.
+- You want code-first agents in TypeScript or Python without wiring the loop yourself.
+- You will run on your own infrastructure (VM, Lambda, Cloudflare Worker, etc).
+
+When it loses: you want provider portability (Vercel AI SDK is closer to that), you want a visual builder (OpenAI Agent Builder or Agentspace), or you have enterprise GCP requirements (Agentspace).
+
+</Section>
+
+<Section id="openai-agent-builder" num={3} title="OpenAI Agent Builder">
+
+OpenAI's hosted offering for building agents. Two surfaces: an SDK (similar shape to Claude Agent SDK) and a visual graph builder for composing agents node by node. The visual builder is the differentiator and the lock-in vector.
+
+What it bundles:
+
+- **SDK + visual builder.** Two surfaces, one underlying runtime.
+- **Hosted threads, sessions, memory.** First-party state on OpenAI infrastructure.
+- **Function calling integrated.** Tools you define are wired in to the agent loop.
+- **Eval framework.** Golden tests, regression scoring, integrated into the platform UI.
+- **Deployment on OpenAI infrastructure.** Limited self-hosting; export paths exist but are uneven across features.
+- **Multi-agent orchestration.** Hand-off flows, sub-agents, role-based agents through the visual builder or the SDK.
+
+When Agent Builder wins:
+
+- OpenAI shop with a team that includes non-engineers who want to compose agents visually.
+- Need built-in evals and deployment without standing up your own.
+- Standard agent shapes (chat, research, customer support) where the visual builder's defaults match what you want.
+
+When it loses: provider portability is a requirement (visual builder is OpenAI-only and hard to migrate), you have strict on-prem or VPC requirements, or your flow is non-standard enough that the visual builder fights you.
+
+</Section>
+
+<Section id="google-agentspace" num={4} title="Google Agentspace (now Gemini Enterprise Agent Platform)">
+
+Google Cloud's enterprise agent platform built on Vertex AI. At Google Cloud Next 2026 the offering was rebranded into the broader Gemini Enterprise umbrella; the standalone "Agentspace" name is being phased out, but the capabilities described below carry over. Positioned for enterprise customers already on GCP, with strong integrations into Google Workspace (Gmail, Drive, Calendar) and enterprise identity (IAM, VPC).
+
+What it bundles:
+
+- **Vertex AI as the model substrate.** Multiple model providers hosted (Gemini, Anthropic via Vertex, third-party open-weights). Multi-provider on the model side.
+- **GCP-native deployment.** Runs in your GCP project with VPC, IAM, audit logging, compliance tooling.
+- **Workspace integrations.** Native connectors for Gmail, Drive, Calendar, Sheets, Docs.
+- **Visual flow editor.** For composing multi-agent workflows.
+- **Enterprise eval and observability.** Compliance-grade reporting; audit logs that integrate with GCP-wide monitoring.
+
+When Agentspace wins:
+
+- Enterprise team already on GCP with Workspace as the primary collaboration substrate.
+- Compliance requirements (HIPAA, SOC 2, regional residency) that are easier on GCP than on a startup-grade platform.
+- Cross-functional agents that need access to Workspace data through audited, IAM-controlled paths.
+
+When it loses: you are not on GCP and not planning to migrate; team is small enough that enterprise overhead is a cost without payoff; your stack is Anthropic or OpenAI-aligned and Vertex's quirks are not worth absorbing.
+
+</Section>
+
+<Section id="vercel-ai-sdk" num={5} title="Vercel AI SDK">
+
+Strictly speaking, Vercel AI SDK is not a managed agent platform. It is a provider-agnostic TypeScript SDK with React-friendly streaming primitives. It belongs in this comparison anyway because it covers similar ground (multi-provider, tool calls, streaming, hooks) without the hosted-state lock-in that the others carry.
+
+What it bundles:
+
+- **Provider abstraction.** Swap Anthropic, OpenAI, Google, open-weights providers with a one-line change. The lowest provider lock-in of any platform here.
+- **Streaming-first React helpers.** Built for Next.js apps where the UI streams tokens as they arrive.
+- **Tool calling support.** Tools defined in TypeScript, typed all the way through.
+- **No hosted state.** You bring your own database; the SDK does not persist for you.
+- **No first-party evals.** Integrate Promptfoo, custom test harness, or another eval framework.
+
+When Vercel AI SDK wins:
+
+- Building a Next.js or React app where streaming UI is core to the UX.
+- Want provider portability and willing to maintain your own state, evals, and observability.
+- Code-first culture; visual builders are not on the requirements list.
+
+When it loses: you want a managed runtime (this is just a library), you need built-in evals, or you want an eval/observability dashboard out of the box.
+
+</Section>
+
+<Section id="matrix" num={6} title="Side-by-side feature matrix">
+
+<Mermaid chart={`flowchart LR
+  RAW["Raw SDK / API<br/>(Module 06)"] --> PORTABLE["Provider portability"]
+  RAW --> CONTROL["Full control"]
+  CASDK["Claude Agent SDK"] --> ANTHROPIC["Anthropic-native"]
+  CASDK --> OWN_INFRA["Run on your infra"]
+  OAB["OpenAI Agent Builder"] --> VIS_BUILDER["Visual builder + evals"]
+  OAB --> HOSTED["Hosted state"]
+  GAS["Google Agentspace"] --> ENTERPRISE["Enterprise + Workspace"]
+  GAS --> GCP_LOCK["GCP-locked infra"]
+  VSDK["Vercel AI SDK"] --> AGNOSTIC["Provider-agnostic"]
+  VSDK --> NO_STATE["No hosted state"]`} />
+
+<p className="text-sm text-ink-500">Each platform's headline trade. Pick where the upside matches your constraint and the downside is acceptable.</p>
+
+<PlatformMatrix />
+
+### Sandbox · Build the feature matrix
+
+<Sandbox
+  id="m09-feature-matrix"
+  mode="js"
+  prompt={<>Return an object keyed by platform name (<code>"claude-agent-sdk"</code>, <code>"openai-agent-builder"</code>, <code>"google-agentspace"</code>, <code>"vercel-ai-sdk"</code>). Each value is an object with boolean fields: <code>hostedState</code>, <code>builtInEvals</code>, <code>multiAgent</code>, <code>visualBuilder</code>, <code>customDeploy</code>, <code>providerLockIn</code>. Specific truths the verifier checks: Claude Agent SDK <code>providerLockIn: true</code>, OpenAI Agent Builder <code>providerLockIn: true</code> and <code>visualBuilder: true</code>, Vercel AI SDK <code>providerLockIn: false</code> and <code>builtInEvals: false</code>, Google Agentspace <code>hostedState: true</code>.</>}
+  starter={`const matrix = {
+  'claude-agent-sdk': {
+    // your code here
+  },
+  'openai-agent-builder': {
+    // your code here
+  },
+  'google-agentspace': {
+    // your code here
+  },
+  'vercel-ai-sdk': {
+    // your code here
+  }
+};
+
+return matrix;`}
+  test={testFeatureMatrix}
+  hint={<>The matrix above the sandbox is the source of truth. Vercel is the only platform with provider portability; OpenAI Agent Builder is the only one with a first-party visual builder; Vercel does not ship evals.</>}
+/>
+
+</Section>
+
+<Section id="lock-in" num={7} title="Lock-in dimensions">
+
+A managed platform locks you in along several axes. Knowing which axes matter for you is what makes the build-vs-buy choice survivable.
+
+The dimensions:
+
+- **Provider lock-in.** Are you tied to one model provider? Claude Agent SDK is Anthropic-only; OpenAI Agent Builder is OpenAI-only; Vercel AI SDK is the most agnostic; Agentspace is multi-provider through Vertex but GCP-locked on infra.
+- **Hosted-state lock-in.** Is your conversation state, memory, and audit trail stored on the vendor's servers in their format? OpenAI threads, Anthropic-managed sessions, Agentspace persistence: each one is its own export-and-port problem if you migrate.
+- **Eval format lock-in.** Are your golden tests and eval reports in the platform's proprietary format? Some platforms (especially the visual-builder-driven ones) make eval data hard to extract.
+- **Deployment-target lock-in.** Where does your agent run? Agentspace runs on GCP. OpenAI Agent Builder runs on OpenAI. Claude Agent SDK and Vercel AI SDK run anywhere.
+- **API surface lock-in.** Is your application code calling platform-specific methods, or is it talking to your own abstraction? This is the one you control: even on a heavily managed platform, abstracting the agent loop behind your own interface keeps the migration cost bounded.
+
+The general pattern: the more managed-ness you accept, the more lock-in you sign up for. Built-in evals and visual builders are the two features that quietly add the most lock-in.
+
+</Section>
+
+<Section id="build-vs-buy" num={8} title="Build vs buy heuristics">
+
+The cleanest signals for "buy":
+
+- Need built-in evals and deployment fast.
+- Limited engineering bandwidth (solo, small team, junior team without prior agent experience).
+- Standard flow shape (chat agent, research, customer support, knowledge-base Q&A).
+- Time-to-market matters more than future migration cost.
+- Non-engineers on the team will be composing flows.
+
+The cleanest signals for "build" (raw SDK or custom harness):
+
+- Custom flow shape that does not match any platform's defaults.
+- Strict latency budgets where every layer needs to be a target for tuning.
+- On-prem or strict data-residency requirements that managed platforms cannot meet.
+- High volume where managed platform pricing becomes punitive.
+- Embedded in another product where the agent is a feature, not a tool.
+
+### Sandbox · Pick the platform from constraints
+
+<Sandbox
+  id="m09-pick-platform"
+  mode="js"
+  prompt={<>Implement <code>pickPlatform(constraints)</code> returning one of <code>"claude-agent-sdk"</code>, <code>"openai-agent-builder"</code>, <code>"google-agentspace"</code>, <code>"vercel-ai-sdk"</code>, or <code>"raw"</code>. Constraints shape: <code>{'{ team, needsHostedState, primaryModel, deploymentTarget, customFlow }'}</code>. Decision rules: (1) if <code>customFlow</code> is true, return <code>"raw"</code> (any custom flow defeats managed platforms). (2) Else if <code>needsHostedState</code>: route by <code>primaryModel</code>: <code>"anthropic"</code> -&gt; <code>"claude-agent-sdk"</code>, <code>"openai"</code> -&gt; <code>"openai-agent-builder"</code>, <code>"google"</code> -&gt; <code>"google-agentspace"</code>. (3) Else if <code>deploymentTarget</code> is <code>"vercel"</code>, return <code>"vercel-ai-sdk"</code>. (4) Else default to <code>"raw"</code>.</>}
+  starter={`function pickPlatform(c) {
+  // your code here
+}
+
+return pickPlatform;`}
+  test={testPickPlatform}
+  hint={<>Apply the rules in order. The customFlow check has to come first; otherwise needsHostedState would route an enterprise OpenAI shop into Agent Builder before the customFlow rule could veto it.</>}
+/>
+
+</Section>
+
+<Section id="migrating" num={9} title="Migrating off a managed platform">
+
+Migration cost is real but bounded. The practical strategy:
+
+1. **Catalog what the platform owned.** Hosted state, evals, observability, deployment, IAM. Each is a separate replacement project.
+2. **Identify the seam.** The interface your application code talked to. If you abstracted "the agent" behind your own interface from day one, the seam is clean. If you peppered platform-specific calls everywhere, the seam is the codebase.
+3. **Build the replacement.** For each owned primitive, pick the swap. Hosted state to your DB; built-in evals to Promptfoo; observability to Datadog; deployment to your CI/CD.
+4. **Run dual-stack.** Send a fraction of traffic through the new path while the platform serves production. Diff outputs. Catch hidden behaviors.
+5. **Cut over and decommission.** Switch traffic; keep the platform around as a fallback for two to four weeks; decommission once confident.
+
+<MigrationStepper />
+
+The hidden tax: replacing the platform's UI surfaces (eval reporters for stakeholders, customer-data integrations, role-based access UIs) takes more eng-weeks than replacing the loop did. Realistic budget for a small-to-mid system: 2 to 6 months of focused work. Plan accordingly; do not promise a one-month migration when scope analysis would say six.
+
+The defensive strategy from day one: abstract the agent loop behind your own interface. Treat the platform as an implementation detail, not the API your code knows about. This caps the migration cost at "swap one implementation"; it does not eliminate the work, but it bounds it.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is intentionally not a managed platform</h3>
+
+    <p>Potter is a tool provider. It exposes ~25 MCP tools that any harness or any managed platform can consume. That positioning is deliberate: a tool layer compatible with all of them rather than competing with any. A user on Claude Agent SDK can call Potter tools; a workflow on Agent Builder can call Potter tools; a Vercel AI SDK app can call Potter tools.</p>
+
+    <p>The spec discipline that makes this possible (pure data tools, no LLM inside, schema-typed inputs, structured outputs) is exactly the discipline that keeps Potter portable across platforms. If Potter shipped its own loop, its own eval framework, its own deployment story, it would be a competitor to Agent Builder rather than a useful layer underneath.</p>
+
+    <p>The lesson generalizes for anyone building tools or integrations meant to outlast a single platform choice: stay below the loop. The harness or platform owns the loop; your tools run inside it.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-managed-platform" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">managed agent platform</p><p className="text-sm text-ink-700">A vendor offering that runs your agent loop, persists state, ships deployment.</p></div>
+  <div id="glossary-claude-agent-sdk" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Claude Agent SDK</p><p className="text-sm text-ink-700">Anthropic's first-party SDK (TypeScript and Python) for building agents on top of the Claude API with first-party loop, tools, memory, and hooks.</p></div>
+  <div id="glossary-openai-agent-builder" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">OpenAI Agent Builder</p><p className="text-sm text-ink-700">OpenAI's hosted offering for building agents via SDK or visual graph editor.</p></div>
+  <div id="glossary-google-agentspace" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Google Agentspace</p><p className="text-sm text-ink-700">Google Cloud's enterprise agent platform built on Vertex AI.</p></div>
+  <div id="glossary-vercel-ai-sdk" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Vercel AI SDK</p><p className="text-sm text-ink-700">Provider-agnostic TypeScript SDK with streaming-first React helpers.</p></div>
+  <div id="glossary-hosted-state" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">hosted state</p><p className="text-sm text-ink-700">Agent state (sessions, memory) persisted on the vendor's servers rather than yours.</p></div>
+  <div id="glossary-visual-builder" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">visual builder</p><p className="text-sm text-ink-700">A graph-style UI for composing agents, nodes connected by edges.</p></div>
+  <div id="glossary-eval-framework" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">eval framework</p><p className="text-sm text-ink-700">Built-in tooling for golden tests, LLM-as-judge, regression. Module 16 deep-dives.</p></div>
+  <div id="glossary-provider-lock-in" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">provider lock-in</p><p className="text-sm text-ink-700">The cost of switching the underlying model provider once you have built on a platform.</p></div>
+  <div id="glossary-build-vs-buy" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">build vs buy</p><p className="text-sm text-ink-700">The decision to handcraft a harness (build) vs use a managed platform (buy).</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m09-q1" question="1. What is the cleanest signal that you should pick a managed platform?">
+Need built-in evals and deployment fast, with limited engineering bandwidth, and your flow fits a standard shape (chat, research, customer support). When the alternative is "we will rebuild eval, deployment, and observability badly in three months," buying is right. The platform's UX surface for non-engineers is often the deciding factor in small teams.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q2" question="2. What is the cleanest signal that managed platforms will hurt you?">
+Custom flow shape that does not match defaults, multi-step orchestration with non-standard sequencing, latency budgets that need raw control over every layer, strict on-prem or data-residency requirements, very high volume where managed pricing becomes punitive, or embedding the agent inside a product where it is a feature rather than a standalone tool.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q3" question="3. How does provider lock-in differ between Claude Agent SDK and Vercel AI SDK?">
+Claude Agent SDK is Anthropic-only by design. Switching providers means rewriting on a different SDK. Vercel AI SDK is provider-agnostic: you can swap Anthropic, OpenAI, Google, or open-weights with a one-line provider change. Pick Claude Agent SDK when you want first-party Claude features integrated; pick Vercel AI SDK when provider portability is the priority.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q4" question="4. Why do most managed platforms ship visual builders?">
+Two reasons. They lower the bar for non-engineers to compose agents, which broadens the target market. And they hide the platform's underlying API surface, which raises switching cost: visual-builder artifacts do not port to other platforms. The first reason is for the customer; the second is for the vendor.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q5" question="5. A startup wants to ship in two weeks with strong evals and zero ops. Recommend?">
+Pick a managed platform: Claude Agent SDK if Anthropic-aligned and you can run on your own infra, OpenAI Agent Builder if you want hosted runtime plus visual builder, Vercel AI SDK if you are building a Next.js app with React streaming. Do not build the loop yourself. The two-week ship is real; the rebuild three months later is the avoidable failure.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q6" question="6. An enterprise client requires data residency in their VPC. Recommend?">
+Raw SDK (Module 06) on their infrastructure, or a managed platform that explicitly supports BYOC: Vertex AI behind Agentspace runs in your GCP project; AWS Bedrock can host Claude in your AWS account; Azure OpenAI runs in Azure tenants. Confirm the residency story before signing anything; "supports BYOC" varies in scope across vendors.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q7" question='7. Is "no managed platform = always better" a defensible position?'>
+No. Managed platforms win when your flow is standard and the alternative is reinventing eval, deployment, and observability poorly. Build-vs-buy is a context decision: solo dev with a custom flow on a tight latency budget should build; small team with a standard chat flow should buy. The mistake is treating either as the universal answer.
+</CheckQuestion>
+
+<CheckQuestion id="m09-q8" question="8. How do you keep migration off a managed platform feasible later?">
+Abstract the agent loop behind your own interface from day one. Treat the platform as an implementation detail; your application code should talk to your interface, not directly to platform-specific methods. This caps migration cost at "swap one implementation." It does not eliminate the cost (you still rebuild evals, observability, deployment), but it bounds it.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+Track 2 wraps here. Next is Track 3, starting with tool design at scale.
+
+<CompleteBanner moduleId="m09" nextSlug="tool-design" nextTitle="Module 10 · Tool design at scale" />
+
+</Section>
+
+<ModuleNav prevSlug="claude-code-surface" prevTitle="Module 08 · Claude Code extension surface" nextSlug="tool-design" nextTitle="Module 10 · Tool design at scale" />

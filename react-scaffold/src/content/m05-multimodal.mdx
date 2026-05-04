@@ -1,0 +1,354 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  FORTY_TWO_PNG_B64,
+  ModalityMatrix,
+  ReasoningSplit,
+  testPickModality,
+  testVisionExtract
+} from './m05-multimodal';
+
+<ModuleHero
+  kicker="Module 05 · Multimodal and reasoning"
+  title="Pick the right modality before you pick the model"
+  lead="Text-only is a habit, not a constraint. Modern models accept images, return images, accept audio, generate speech, and reason silently before answering. Knowing which modality you actually need is half the architecture."
+  trackId="foundations"
+  moduleId="m05"
+/>
+
+<Toc items={[
+  { href: '#what-multimodal', label: 'What multimodal actually means' },
+  { href: '#vision-in', label: 'Vision-in' },
+  { href: '#image-out', label: 'Image-out' },
+  { href: '#image-to-code', label: 'Image-to-code workflow' },
+  { href: '#audio', label: 'Audio in and out' },
+  { href: '#documents', label: 'Document understanding' },
+  { href: '#reasoning', label: 'Reasoning models' },
+  { href: '#reasoning-trap', label: 'When thinking hurts' },
+  { href: '#picking', label: 'Picking modality and reasoning together' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-multimodal" num={1} title="What multimodal actually means in 2026">
+
+"<GLink slug="multimodal">Multimodal</GLink>" is the headline, but it covers a much smaller set of patterns than the marketing implies. Each model has a specific list of input modalities and a specific list of output modalities, and the cross-product is not full. By 2026, the production landscape looks like this:
+
+- **Text-in, text-out.** Every chat and completion model. The default. The cheapest cost band. Most of the course lives here.
+- **Image-in, text-out.** Vision. All frontier chat models accept image content blocks. This is the most common multimodal pattern in real applications, by a wide margin.
+- **Text-in, image-out.** Image generation. Different model family from chat (gpt-image-2, Flux, Stable Diffusion variants).
+- **Audio-in, text-out.** Automatic speech recognition. Whisper and its successors.
+- **Text-in, audio-out.** Text-to-speech. ElevenLabs, OpenAI TTS.
+- **Audio-in, audio-out.** Real-time voice agents. OpenAI Realtime, Vapi, Retell. Voice in one side, voice out the other, model in the middle.
+
+The cells outside that list (image-in audio-out, audio-in image-out) exist as research demos but do not have a clean production API in 2026. When you need them you cascade through text instead: ASR to text, then text-to-image; or vision to text, then TTS.
+
+<Mermaid chart={`flowchart LR
+  TI["text"] --> CHAT["chat / completion<br/>(every model)"]
+  TI --> IMG["image gen<br/>(gpt-image-2, Flux)"]
+  TI --> TTS["TTS<br/>(ElevenLabs, OpenAI TTS)"]
+  IMI["image"] --> CHAT
+  IMI --> EDIT["edit / inpaint<br/>(gpt-image-2)"]
+  AUI["audio"] --> ASR["ASR<br/>(Whisper)"]
+  AUI --> RT["realtime voice<br/>(Realtime API, Vapi)"]
+  CHAT --> TO["text"]
+  IMG --> IMO["image"]
+  EDIT --> IMO
+  TTS --> AUO["audio"]
+  ASR --> TO
+  RT --> AUO`} />
+
+<p className="text-sm text-ink-500">Production-supported combinations. Cells not shown (image-in audio-out, audio-in image-out) cascade through text in real systems.</p>
+
+The matrix below makes this concrete. Click any cell.
+
+<ModalityMatrix />
+
+</Section>
+
+<Section id="vision-in" num={2} title="Vision-in: getting images into the prompt">
+
+The most common multimodal pattern, and almost always the right starting point if your task involves an image at all. Anthropic, OpenAI, and Gemini all accept images as content blocks alongside text. The wire format is straightforward:
+
+<CodeBlock lang="js">{`const response = await client.messages.create({
+  model: 'claude-opus-4-7',
+  max_tokens: 1024,
+  messages: [{
+    role: 'user',
+    content: [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: pngBase64String
+        }
+      },
+      { type: 'text', text: 'What number is shown in this image? Reply with just the digits.' }
+    ]
+  }]
+});`}</CodeBlock>
+
+Two practical mechanics. First, you have a choice between **base64** (encode the image into the request body) and **url** (give the API a URL it fetches itself). Base64 is portable and self-contained but inflates the request size. URL is smaller on the wire but assumes the API can reach the URL and that the URL is stable. For ephemeral images you generate at request time (canvas screenshots, OCR scans), use base64. For images already hosted on a CDN you control, URL is fine.
+
+Second, **resolution and tile costs**. Anthropic and OpenAI both charge for vision in token-equivalent units that scale with image dimensions. A 1024x1024 image costs more tokens than a 512x512 one. If you do not need full resolution to answer the question, downscale before encoding. This is a 2x to 4x cost cut on a vision-heavy workload that makes no quality difference.
+
+What the model actually sees is a learned image embedding, not pixels. Treat that as you would any other compressed representation: it captures content well, captures fine-grained text moderately well at sufficient resolution, and is not infallible. If the image is a screenshot of a small font, expect the model to misread some characters. The fix is higher resolution input or a real OCR pass first.
+
+### Sandbox · Read a number from an image
+
+This sandbox calls the real Anthropic API from your browser using your stored API key. The starter includes a small base64 PNG of the digits "42". Send the image plus a text question and return the model's reply.
+
+<Sandbox
+  id="m05-vision-extract"
+  mode="anthropic"
+  prompt={<>The starter exposes <code>FORTY_TWO_PNG_B64</code>, a base64-encoded PNG showing the digits 42 in black on white. Build a single user message with two content blocks: an <code>{'{ type: "image", source: { type: "base64", media_type: "image/png", data: FORTY_TWO_PNG_B64 } }'}</code> block first, then a <code>{'{ type: "text", text: "..." }'}</code> block asking what number is in the image and requesting just the digits in reply. Send it via <code>claude(opts)</code> with <code>max_tokens: 64</code>. Pull the first <code>type: "text"</code> block out of <code>response.content</code> and return its <code>text</code> field as a string. The verifier checks that the returned string contains <code>"42"</code>; extra prose is fine.</>}
+  starter={`const FORTY_TWO_PNG_B64 = ${'`' + FORTY_TWO_PNG_B64 + '`'};
+
+const response = await claude({
+  messages: [
+    // your code: one user message with image + text content blocks
+  ],
+  max_tokens: 64
+});
+
+// extract the assistant's text reply
+const text = /* your code */;
+
+return text;`}
+  test={testVisionExtract}
+  hint={<>The image content block goes <em>before</em> the text question in the same message. Pulling text out: <code>{'response.content.find(b => b.type === "text").text'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="image-out" num={3} title="Image-out: generating images from prompts">
+
+Image generation lives in a different model family from chat. The current production options:
+
+- **OpenAI gpt-image-2.** OpenAI's flagship image model. Strong on instruction-following and on text-rendering inside images, both of which previous-generation diffusion models struggled with. Priced per image, with quality tiers.
+- **Black Forest Labs Flux.** The leading open-weights image model in 2026. Hosted by Together, Fireworks, Replicate. Open weights you can self-host if you have GPU.
+- **Stable Diffusion successors.** SDXL and its descendants. Older but still ubiquitous on Replicate and via local runtimes (ComfyUI, Automatic1111). Cost-effective for high-volume workloads.
+- **Google nano-banana.** Codename for a Gemini-family image model. Available through Google's image generation endpoint.
+
+Two operations matter:
+
+- **Generate from scratch.** Text prompt in, new image out. Standard image-gen.
+- **Edit / inpaint.** Existing image plus a prompt and an optional mask, modified image out. Used for "change the background", "remove this object", "add a sign here". Different price point, different quality bar.
+
+Cost is per-image, not per-token. A high-quality 1024x1024 image runs in the single-cent range on hosted APIs, with edits roughly the same. At very high volume, self-hosted Flux on rented GPUs gets cheaper, but the operational burden is real. For a normal application sending dozens to thousands of images a day, hosted is cheaper than self-hosted unless privacy forces your hand.
+
+<Callout kind="note" title="The quality gap on text inside images closed in 2025-2026.">
+Older diffusion models were notoriously bad at rendering text inside generated images (signs, posters, UIs would come out garbled). The current generation (gpt-image-2, Flux Pro) handles short text strings reliably. Long paragraphs are still risky. Verify the specific text-in-image quality with a few generations before committing to a workflow that depends on it.
+</Callout>
+
+</Section>
+
+<Section id="image-to-code" num={4} title="Image-to-code: the design workflow">
+
+A specific workflow worth naming because it has become standard in 2026 for building UI quickly:
+
+1. Generate a mockup with image-gen. Prompt the image model with a description of the UI you want: layout, color palette, components, mood. Get back a single image.
+2. Hand the image to a coding agent. Drop the image into Claude Code, Cursor, Codex, or any vision-capable harness with a prompt like "produce a React component matching this design."
+3. The coding agent reads the image, infers component structure, writes JSX and CSS, and you iterate.
+
+This works because the visual constraints in the image are precise enough to steer code generation. The agent does not have to invent a layout; it copies one from the image. It works less well when the image has implicit interactions (hover states, animations, error flows) that the static frame cannot show. For those, you describe the missing pieces in text.
+
+The reason to name this workflow rather than just describe vision-in: it composes two modality flips (text-in image-out, then image-in text-out) into a tighter design loop than either step alone. You produce a richer artifact than text-only prompting would give the coding agent, in less time than designing in Figma and exporting.
+
+</Section>
+
+<Section id="audio" num={5} title="Audio in and out, briefly">
+
+Audio gets its own dedicated module ([Module 14](/m/voice-realtime)) because production voice agents have enough infrastructure (telephony, streaming, latency budgets, interruption handling) to fill one on their own. This section is the lay-of-the-land.
+
+Three building blocks:
+
+- **ASR (audio-in, text-out).** OpenAI Whisper is still the default open-weights ASR; both OpenAI and Google offer their own hosted ASR endpoints with similar quality. Cost is per-minute or per-second of audio.
+- **TTS (text-in, audio-out).** ElevenLabs is the production-quality default for voice synthesis. OpenAI's TTS endpoint is competitive and cheaper; many open-source options exist. Cost is per-character.
+- **Realtime APIs (audio-in, audio-out).** OpenAI Realtime, Vapi, Retell. Two-way streaming audio with the model in the middle, designed for sub-second turn-taking. Cost is per-minute and noticeably higher than text.
+
+The composition rule: most production "voice agents" are not real audio-in audio-out models. They are pipelines: audio in → ASR to text → text model decides → TTS to audio out. The Realtime API category exists for the cases where pipeline latency is too high (typically anything that needs sub-500ms turn-taking, like phone calls). For asynchronous use cases (transcribe a meeting, summarize a voicemail), the cascade through text is cheaper and equally effective.
+
+</Section>
+
+<Section id="documents" num={6} title="Document understanding">
+
+PDFs, docx files, scanned forms, structured documents with tables and columns. You can treat these as flat images and feed them into a vision model, but the result is mediocre because vision loses paragraph and table semantics. The better tool is a **document understanding** API designed for the format.
+
+- **Anthropic file API.** Upload a PDF, get a file_id, reference it in the messages array as a content block. The API preserves text and layout structure so the model attends correctly to paragraphs, headings, and tables.
+- **OpenAI file uploads.** Same general shape: upload, reference by id, model reads the structured content rather than rendering it as a flat image.
+- **Specialized document AI.** Google Document AI, AWS Textract, and similar are dedicated extraction services. Use them when you need cell-level accuracy on tables, signature detection, or schema-bound extraction at scale.
+
+The simple rule: if your document has structure you care about (paragraphs, columns, tables, sections), use a document API. If it is genuinely a flat image of text (a screenshot, a photo of a sign), vision-in is fine. Treating a 50-page PDF as 50 page images works but burns vision tokens disproportionately and degrades extraction quality.
+
+</Section>
+
+<Section id="reasoning" num={7} title="Reasoning models: thinking before answering">
+
+A vanilla model produces an answer immediately: input tokens go in, the response decodes from the first visible token onward. A <GLink slug="reasoning-model">reasoning model</GLink> does something different. Before producing the visible answer, it generates a hidden chain-of-thought that the user does not see, but that the model itself attends to when composing the final response.
+
+Three production families to know in 2026:
+
+- **Claude with extended thinking.** Anthropic exposes a <GLink slug="thinking-block">thinking content block</GLink> on supported Claude models. You opt in by setting a thinking budget on the request; the response comes back with one or more thinking blocks before the visible text and tool_use blocks. The harness chooses whether to show or hide the thinking trace.
+- **OpenAI o-series.** A separate model family from GPT-x. The reasoning happens inside the model and is not surfaced to the API consumer on most variants; you see the final answer, the thinking is implicit and billed.
+- **Gemini Thinking.** Google's reasoning variant. Same general shape.
+
+The structural difference is what the demo below visualizes. The vanilla model goes straight from prompt to answer. The reasoning model emits a thinking block first, then the answer.
+
+<ReasoningSplit />
+
+The cost is straightforward: more tokens. A reasoning model burning 5,000 thinking tokens before producing a 200-token answer bills as if it produced a 5,200-token answer, with proportionally longer wall time because all that thinking happens inside the same generation. The benefit is also straightforward, on the right tasks. Reasoning models reliably win on:
+
+- **Hard math and step-by-step calculation.** Problems where one wrong intermediate step cascades.
+- **Multi-step planning where order matters.** Architecture trade-offs, complex routing decisions, situations where the model has to consider three options and rule two out.
+- **Debugging.** Reading a stack trace, hypothesizing causes, narrowing the search space.
+- **Hard instruction-following with many constraints.** Prompts where the answer has to satisfy ten rules simultaneously.
+
+</Section>
+
+<Section id="reasoning-trap" num={8} title="The reasoning trap: when thinking hurts">
+
+Reasoning models are not strictly better. They are differently better, on a specific task profile. Reach for them where the markup pays off and avoid them where it does not.
+
+When reasoning hurts:
+
+- **Easy or short tasks.** A reasoning model burning 3,000 thinking tokens to format a date is wasted budget. The non-reasoning answer was already correct; the thinking is overhead.
+- **Latency-sensitive paths.** Streaming UIs that need the first user-visible token in under a second cannot afford ten seconds of upstream thinking. Voice agents, real-time chat, anything with turn-taking budgets.
+- **Strict structured output.** Reasoning sometimes drifts the model away from the strict JSON or schema it was supposed to produce. The thinking block re-anchors the model on natural language, which can leak into the final output. [Module 12](/m/structured-output) covers this in detail.
+- **High-volume cheap calls.** When you are sending a million calls a day, the per-call markup compounds into a real budget hit. Use a small fast model for the volume, reserve reasoning for the hard tail.
+
+The cheap mental model: reasoning is a tool, not a default. It is a budget you spend to buy correctness on hard problems. If the problem is not hard, you are paying for nothing.
+
+</Section>
+
+<Section id="picking" num={9} title="Picking modality and reasoning together">
+
+The two decisions compose. Once you know what modality the task needs, you can decide whether to spend a reasoning budget on top.
+
+| Task shape | Modality | Reasoning? |
+|---|---|---|
+| Summarize a news article | text-in text-out | No |
+| Extract data from a clean screenshot | vision-in text-out | No |
+| Extract data from a messy multi-page PDF | doc-in text-out | Maybe; reasoning helps when layout is ambiguous |
+| Generate a UI mockup from a description | text-in image-out | N/A; reasoning is a chat-model feature |
+| Transcribe a meeting | audio-in text-out | N/A; ASR is its own model family |
+| Phone agent | audio-in audio-out | No; reasoning latency breaks turn-taking |
+| Plan a 6-step debug investigation | text-in text-out | Yes; multi-step planning is the reasoning sweet spot |
+| Solve a hard math word problem | text-in text-out | Yes; chain-of-thought wins |
+| Triage 1000 leads by ICP fit | text-in text-out | No; volume kills the budget; route to a fast cheap model |
+
+The rules of thumb:
+
+1. **Pick modality first.** Choose the smallest input and output modalities the task actually requires. Text only? Use text only. Adding a modality you do not need adds cost and latency.
+2. **Reasoning is a separate decision, only on chat-shaped tasks.** Image generation, ASR, and TTS do not have a reasoning analog. Inside chat tasks, reasoning is opt-in for hard or high-stakes work.
+3. **Latency budgets veto reasoning.** If the task has a sub-second TTFT requirement, reasoning is off the table regardless of how hard the task is. Restructure the task or use a vanilla model.
+4. **Volume vetoes reasoning by default.** High-volume cheap calls should run on a small vanilla model. Reserve reasoning for the rare, hard, expensive-to-be-wrong calls.
+
+### Sandbox · Pick modality
+
+Implement `pickModality(task)` returning the right input/output modality combo for canonical task shapes.
+
+<Sandbox
+  id="m05-pick-modality"
+  mode="js"
+  prompt={<>The task object has a <code>kind</code> field. Implement the mapping: <code>"extract-from-pdf"</code> returns <code>"doc-in-text-out"</code>; <code>"extract-from-screenshot"</code> returns <code>"vision-in-text-out"</code>; <code>"generate-ui-mockup"</code> returns <code>"text-in-image-out"</code>; <code>"transcribe-meeting"</code> returns <code>"audio-in-text-out"</code>; <code>"phone-agent"</code> returns <code>"audio-in-audio-out"</code>; <code>"summarize-news-article"</code> returns <code>"text-in-text-out"</code>. Anything else, including unknown kinds, returns <code>"text-in-text-out"</code>: when in doubt, the cheapest modality is the safest default.</>}
+  starter={`function pickModality(task) {
+  // your code here
+}
+
+return pickModality;`}
+  test={testPickModality}
+  hint={<>Object map plus a fallback. <code>{'const map = { "extract-from-pdf": "doc-in-text-out", ... }; return map[task.kind] ?? "text-in-text-out";'}</code></>}
+/>
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Where Potter sits on the modality grid</h3>
+
+    <p>Potter is text-out by design. Every Potter MCP tool returns text or structured data; none of them generate images, none of them speak. The decision is intentional and forces a clean separation: visual output belongs in the harness's render layer, not in a tool's response, because tool_results are consumed by the model on the next turn and large image data inflates context and corrupts attention.</p>
+
+    <p>Vision-in does happen inside Potter, but in exactly one place: the <code>potter_browser_act</code> tool. When Potter is navigating a dynamic page (Cloudflare challenge, anti-bot redirect, login wall), Stagehand takes a screenshot, passes it to a vision-capable model along with the action goal, and the model emits the next click or fill. The screenshot is read once, decided against, and discarded; it never makes it back to the harness above Potter as a tool_result.</p>
+
+    <p>This is the pattern: <em>consume modality where it is needed, return text everywhere else</em>. It keeps Potter cheap to call, keeps the harness's context window clean, and lets you swap which model the harness uses without touching Potter's modality contract.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-multimodal" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">multimodal</p><p className="text-sm text-ink-700">A model that accepts or produces more than one modality (text, image, audio, video).</p></div>
+  <div id="glossary-vision-in" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">vision-in</p><p className="text-sm text-ink-700">A model accepting images as input and returning text. The most common multimodal pattern in production.</p></div>
+  <div id="glossary-image-generation" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">image generation</p><p className="text-sm text-ink-700">A model producing an image from a text prompt or a reference image. gpt-image-2, Flux, Stable Diffusion.</p></div>
+  <div id="glossary-asr" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ASR</p><p className="text-sm text-ink-700">Automatic speech recognition. Audio in, text out. Whisper is the default; many hosted variants exist.</p></div>
+  <div id="glossary-tts" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">TTS</p><p className="text-sm text-ink-700">Text-to-speech. Text in, audio out. ElevenLabs, OpenAI TTS, many open-source options.</p></div>
+  <div id="glossary-reasoning-model" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">reasoning model</p><p className="text-sm text-ink-700">Models that emit hidden chain-of-thought before the user-visible answer. Claude extended thinking, OpenAI o-series, Gemini Thinking.</p></div>
+  <div id="glossary-extended-thinking" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">extended thinking</p><p className="text-sm text-ink-700">Anthropic's reasoning mode. You opt in via a thinking budget; response includes thinking content blocks alongside text and tool_use.</p></div>
+  <div id="glossary-thinking-block" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">thinking block</p><p className="text-sm text-ink-700">Content block type holding reasoning the model did before answering. Billed and counted toward latency; harness chooses whether to render.</p></div>
+  <div id="glossary-document-understanding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">document understanding</p><p className="text-sm text-ink-700">Models or APIs designed for PDFs, docx, structured documents, with layout and table awareness.</p></div>
+  <div id="glossary-nano-banana" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">nano-banana</p><p className="text-sm text-ink-700">Codename for a Google image generation model in the Gemini family.</p></div>
+  <div id="glossary-inpainting" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">inpainting</p><p className="text-sm text-ink-700">Image generation that edits a region of an existing image while keeping the rest. Sister to image-out from scratch.</p></div>
+  <div id="glossary-image-to-code" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">image-to-code</p><p className="text-sm text-ink-700">Workflow where a generated UI mockup is handed to a coding agent that produces matching JSX/CSS.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m05-q1" question="1. What is the most common multimodal pattern in production, and why?">
+Vision-in, text-out. Most multimodal use cases are about reading something visual (a screenshot, a photo, a chart, a page) and producing structured analysis or extraction in text. Every frontier chat model accepts image content blocks alongside text, and the cost band is comparable to text-only on similar input sizes. Image-out, audio-in, and audio-out are real but live in separate model families and are reached for less often.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q2" question="2. Why is image-out separate from text-out in most APIs?">
+Different model families with different latency, cost, and quality profiles. Image generation is a diffusion or autoregressive image model (gpt-image-2, Flux, Stable Diffusion), entirely separate from the chat models that produce text and tool calls. Combining the two in a single call would tie the chat model's latency to image generation's compute and would lose the ability to swap one without the other. The clean split lets each scale independently and lets you pick the right tier for each step.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q3" question="3. Reasoning models cost more. When is that worth it?">
+Hard math, multi-step planning, debugging, and tasks with many simultaneous constraints. Anywhere the model has to consider intermediate steps and where one wrong intermediate cascades into a wrong final answer. The hidden thinking block buys the model space to do that work. The markup is real (more tokens, more latency) but the accuracy gain pays for itself on tasks the vanilla model gets noticeably wrong without it.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q4" question="4. When do reasoning models make things worse?">
+Easy tasks (the thinking burns budget on a problem the vanilla answer already nailed), latency-sensitive paths (ten seconds of upstream thinking breaks any sub-second TTFT requirement), strict structured output (the thinking block can drift the model off the schema), and high-volume cheap calls (the markup compounds into a real cost hit when you are running millions per day).
+</CheckQuestion>
+
+<CheckQuestion id="m05-q5" question="5. How is extended thinking represented in the API response?">
+As thinking content blocks, separate from text and tool_use blocks, in the same response. The thinking blocks come before the visible answer in the content array. The harness can read them (for logs, for chain-of-thought visualization) or skip them entirely when rendering to the user. Either way they are billed and counted toward the response's total wall time.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q6" question="6. Why prefer a doc API over raw vision for PDFs?">
+Document APIs preserve layout and structure (paragraphs, columns, tables, headings, sections) by reading the underlying file format rather than rendering it as a flat image. Raw vision treats the page as pixels and loses paragraph boundaries, table cell structure, and reading order. The result is poorer extraction quality at higher token cost. Vision-in is fine for genuinely image-shaped content (screenshots, photos of signs); for PDFs and docx files, the doc API is the right tool.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q7" question="7. What is the image-to-code workflow and why does it work?">
+Generate a visual mockup with image-gen (gpt-image-2 or Flux), then hand the image to a coding agent (Claude Code, Cursor, Codex) and ask it to produce matching JSX and CSS. It works because the visual constraints in the image (layout, components, color palette, typography) are precise enough to steer code generation: the agent does not have to invent the layout, only translate it. The composition of two modality flips (text to image, then image to code) gives the coding agent a richer artifact than text-only prompting would.
+</CheckQuestion>
+
+<CheckQuestion id="m05-q8" question="8. Why does Potter never return images?">
+Tool_results feed back into the model's context window on the next turn. Returning an image as a tool_result inflates context and corrupts attention; the model spends tokens reasoning about a picture instead of reasoning about the question. Visual output belongs in the harness's render layer, not in a tool response. Potter consumes images internally where it has to (browser screenshots inside potter_browser_act) and discards them after one decision; it never sends image data back across the MCP boundary.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You now have the modality grid and the reasoning toggle as separable design decisions. Track 1 wraps here; the next module starts the Interfaces track with the four ways you can package the API call.
+
+<CompleteBanner moduleId="m05" nextSlug="api-sdk-cli-mcp" nextTitle="Module 06 · API · SDK · CLI · MCP" />
+
+</Section>
+
+<ModuleNav prevSlug="prompt-engineering" prevTitle="Module 04 · Prompt engineering" nextSlug="api-sdk-cli-mcp" nextTitle="Module 06 · API · SDK · CLI · MCP" />

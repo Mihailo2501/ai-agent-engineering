@@ -1,0 +1,411 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  OutboundRunStepper,
+  CostBreakdownDemo,
+  testWritePersonalizedMessage,
+  testBuildEmailDraft,
+  testPreFlight
+} from './m22-gtm-agent-1';
+
+<ModuleHero
+  kicker="Module 22 · GTM agent: personalized cold email drafter"
+  title="GTM agent: personalized cold email drafter"
+  lead="Per-lead Potter research, persona-matched email composition, dry-run before Gmail draft creation. No paid SaaS required."
+  trackId="applied"
+  moduleId="m22"
+/>
+
+<Toc items={[
+  { href: '#what-it-does', label: 'What this agent does and why' },
+  { href: '#user-story', label: 'The user story' },
+  { href: '#tools', label: 'Tool layer' },
+  { href: '#architecture', label: 'Architecture: dry-run, interactive, background' },
+  { href: '#loop', label: 'Building the loop' },
+  { href: '#voice', label: 'Persona-matched cold email' },
+  { href: '#gmail-drafts', label: 'Gmail drafts' },
+  { href: '#eval', label: 'Eval setup' },
+  { href: '#deploy', label: 'Deployment' },
+  { href: '#what-broke', label: 'Iteration log: what broke' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-it-does" num={1} title="What this agent does and why">
+
+The agent ingests a list of leads, researches each lead, drafts a short personalized cold email, and creates a Gmail draft only after a <GLink slug="dry-run">dry-run</GLink> review passes. It does not auto-send. The useful automation is upstream: research, synthesis, quality checks, idempotent draft creation, and an audit trail.
+
+Generic outbound fails because the first sentence could apply to anyone. This agent forces specificity by making Potter research the input to every email and making the pre-flight gate reject obvious machine-written patterns. The human stays on the loop where judgment matters: approving the exact draft before Gmail receives it.
+
+The shape that survives production:
+
+- Lead in from CSV, webhook payload, or M23's funding monitor output.
+- Potter research for person, company, and recent activity.
+- Claude drafts a subject and a body in the user's voice.
+- Pre-flight check blocks bad subject lines, banned phrases, extra sentence count, and em dashes.
+- Gmail draft object is built locally with an <GLink slug="idempotency-key-per-lead">idempotency key per lead</GLink>.
+- Dry-run lands in Slack.
+- Human approval flips the write gate.
+- Approved drafts are created in Gmail.
+
+<Callout kind="info" title="Drafts, not sends.">
+  Gmail draft creation is a safer boundary than automatic sending. The agent does the repetitive work; the human still controls whether and when the email leaves the mailbox.
+</Callout>
+
+</Section>
+
+<Section id="user-story" num={2} title="The user story">
+
+Monday morning. A list of 50 fresh leads from a webinar last week. The goal: 50 personalized draft emails in Gmail by Monday afternoon, each one referencing something specific from the lead's recent activity.
+
+Without the agent: a day of manual research and writing. Open LinkedIn, read the profile, scan posts, search the company, draft a short email, paste into Gmail, repeat. Ten minutes per lead at best; longer when you actually research deeply.
+
+With the agent: five minutes for the research and message generation across all 50 because Potter and Claude run in parallel. Thirty minutes for the human review: read each proposed subject and body, reject anything off-tone, approve the rest. The agent then creates Gmail drafts for approved leads.
+
+The economics are defensible. Potter and Claude stay around cents per lead, and Gmail draft creation is free at normal volumes. The discipline is what makes it usable: voice rules, dry-run, idempotency, and audit logs.
+
+</Section>
+
+<Section id="tools" num={3} title="Tool layer: provider survey">
+
+Three tool surfaces show up in the loop:
+
+- **Potter MCP for research.** `potter_research_person` for role, tenure, and public profile context; `potter_research_company` for firmographic and recent company context; `potter_summarize_linkedin_posts` for recent post hooks; `potter_find_decision_maker` when the imported lead is not the right person.
+- **Claude API for composition.** Sonnet writes the subject and body. The system prompt holds the voice rules and 3 to 5 few-shot examples; user content is the research blob and the lead. Output is plain text, maximum 3 body sentences.
+- **Gmail API for drafts.** `users.drafts.create` writes a draft into the user's mailbox after approval. The agent builds the RFC 2822 message, encodes it, and stores an `X-Idempotency-Key` header so reruns can be reconciled.
+
+Cost per lead, illustrative:
+
+<CostBreakdownDemo />
+
+</Section>
+
+<Section id="architecture" num={4} title="Architecture: dry-run, interactive, background">
+
+The same loop runs in three modes:
+
+- **`--dry-run`.** Mandatory by global rule. Logs everything that would happen without writing to Gmail. Slack receives a thread per batch with each proposed subject and body rendered as a review card.
+- **Interactive.** Ad-hoc lists. You run the script with a CSV path; it processes the list; the dry-run lands in Slack; you approve.
+- **Background.** Cron-driven or n8n-triggered batches, such as M23's Monday funding monitor flowing into Tuesday outreach. Same loop; different trigger.
+
+Idempotency per lead uses the normalized email address as the key. A lead processed last week and present again this week is recognized. The agent can skip draft creation or update the review card instead of writing duplicates.
+
+<Mermaid chart={`flowchart LR
+  CSV["lead list / webhook"] --> LOOP["agent loop"]
+  LOOP --> POTTER["Potter MCP<br/>research"]
+  LOOP --> CLAUDE["Claude<br/>compose email"]
+  CLAUDE --> CHECK{"pre-flight<br/>check"}
+  CHECK -->|fail| REVIEW["needs review"]
+  CHECK -->|pass| BUILD["build Gmail draft object"]
+  BUILD --> DRY["Slack dry-run"]
+  DRY --> APPROVE{"human<br/>approve?"}
+  APPROVE -->|no| REJECT["rejected"]
+  APPROVE -->|yes| GMAIL["Gmail drafts.create"]`} />
+
+</Section>
+
+<Section id="loop" num={5} title="Building the loop">
+
+A working sketch. The script reads a CSV; for each lead it researches, composes, validates, logs a dry-run, and creates a Gmail draft only when the write gate is open.
+
+<CodeBlock lang="ts">{`import 'dotenv/config';
+import { readFileSync } from 'fs';
+import { parse } from 'csv-parse/sync';
+import Anthropic from '@anthropic-ai/sdk';
+import { Client as MCPClient } from '@modelcontextprotocol/sdk/client';
+import { createGmailDraft } from './gmail';
+import { postDraftReviewToSlack } from './slack';
+
+const DRY_RUN = process.argv.includes('--dry-run');
+
+const claude = new Anthropic();
+const potter = await MCPClient.fromCommand('npx potter-mcp');
+
+const SYSTEM = readFileSync('prompts/cold-email-system.md', 'utf-8');
+const FEW_SHOTS = JSON.parse(readFileSync('prompts/few-shots.json', 'utf-8'));
+
+async function processLead(row: {
+  email: string;
+  first_name: string;
+  last_name: string;
+  linkedin_url: string;
+  company_domain: string;
+}) {
+  console.log({ event: 'lead.start', email: row.email });
+
+  const [person, company, posts] = await Promise.all([
+    potter.callTool({ name: 'potter_research_person', arguments: { linkedin_url: row.linkedin_url } }),
+    potter.callTool({ name: 'potter_research_company', arguments: { domain: row.company_domain } }),
+    potter.callTool({ name: 'potter_summarize_linkedin_posts', arguments: { linkedin_url: row.linkedin_url } })
+  ]);
+
+  const research = { person: person.content[0], company: company.content[0], posts: posts.content[0] };
+
+  const response = await claude.messages.create({
+    model: 'claude-sonnet-4-6',
+    max_tokens: 300,
+    system: [{ type: 'text', text: SYSTEM, cache_control: { type: 'ephemeral' } }],
+    messages: [
+      ...FEW_SHOTS,
+      { role: 'user', content: 'Draft a cold email for this lead.\\n\\nResearch:\\n' + JSON.stringify(research) }
+    ]
+  });
+
+  const text = (response.content.find((b) => b.type === 'text') as any).text.trim();
+  const parsed = JSON.parse(text) as { subject: string; body: string };
+
+  const check = preFlightCheck({ message: parsed.body, subject: parsed.subject });
+  if (!check.ok) {
+    console.warn({ event: 'lead.blocked', email: row.email, blockers: check.blockers });
+    return;
+  }
+
+  const draft = buildEmailDraft({ lead: row, subject: parsed.subject, body: parsed.body });
+  await postDraftReviewToSlack({ lead: row, draft, dryRun: true });
+
+  if (DRY_RUN) {
+    console.log({ event: 'lead.dry-run', email: row.email, subject: parsed.subject });
+    return;
+  }
+
+  await createGmailDraft(draft);
+  console.log({ event: 'lead.draft_created', email: row.email });
+}
+
+const rows = parse(readFileSync(process.argv[2], 'utf-8'), { columns: true });
+for (const row of rows) await processLead(row);`}</CodeBlock>
+
+<OutboundRunStepper />
+
+</Section>
+
+<Section id="voice" num={6} title="Persona-matched cold email">
+
+A model writing in your voice is a system-prompt problem, not a fine-tuning problem. The pattern that holds:
+
+- **Rules in the system prompt.** Short sentences. No em dashes. No <GLink slug="llm-tell">LLM-tells</GLink> like "just wanted to", "i came across", or "i hope this". No markdown. Maximum 3 body sentences.
+- **Few-shot examples.** Three to five real emails you have written and that worked. Pasted into the messages array as alternating user-content and assistant-content turns. The model learns tone faster from examples than from rules.
+- **Hook reference required.** The system prompt requires the first sentence to reference something specific from the research blob: a recent post, product mention, hiring signal, funding event, or video.
+- **Aggressive prompt caching.** The system prompt and few-shots are stable across the batch. Cache them; per-lead cost drops.
+
+A sketched system prompt:
+
+<CodeBlock lang="md">{`You write personalized cold emails in {USER}'s voice.
+
+Voice rules:
+- Short sentences. Direct. Specific.
+- No em dashes anywhere.
+- No "just wanted to", "i came across", "i hope this", "circling back", "reaching out to", or "touching base".
+- No markdown formatting.
+- Body is maximum 3 sentences total.
+- Subject is non-empty and 80 characters or less.
+
+Required:
+- Reference one specific thing from the research blob.
+- First body sentence is the personalization.
+- Second body sentence is the value.
+- Third body sentence is a soft CTA.
+- Return JSON: { "subject": "...", "body": "..." }.`}</CodeBlock>
+
+### Sandbox · Compose a personalized cold email
+
+<Sandbox
+  id="m22-write-personalized-message"
+  mode="anthropic"
+  prompt={<>Use <code>claude(opts)</code> with a tight system prompt to compose a cold email body for the research blob in the starter. Constraints: maximum 3 sentences, no em dashes, no banned phrases ("just wanted to", "i came across", "i hope this", "circling back", "reaching out to", "touching base"), and the body must reference something from <code>recent_post</code> (mentions Remotion, GTM Movie, or video). Return the body text.</>}
+  starter={`const research = {
+  first_name: 'Alex',
+  role: 'Head of Growth',
+  company: 'Acme',
+  recent_post: 'Posted about Remotion as the rendering engine they evaluated for video personalization at scale.'
+};
+
+const system = \`You write personalized cold emails in Mihailo's voice.
+Rules: short sentences, no em dashes, no markdown, no "just wanted to", no "i came across", no "i hope this", no "circling back", no "reaching out to", no "touching base".
+Maximum 3 sentences. First sentence references something specific from the research. Second sentence is the value. Third sentence is a soft CTA.\`;
+
+const response = await claude({
+  system,
+  messages: [
+    { role: 'user', content: 'Compose for: ' + JSON.stringify(research) }
+  ],
+  max_tokens: 256
+});
+
+const text = response.content.find(b => b.type === 'text').text.trim();
+return text;`}
+  test={testWritePersonalizedMessage}
+  hint={<>The research blob mentions Remotion. Make sure your email references Remotion, video, or GTM Movie. Keep it 3 sentences max and verify no banned phrase appears.</>}
+/>
+
+</Section>
+
+<Section id="gmail-drafts" num={7} title="Gmail draft creation">
+
+Gmail draft creation is a clean final write because it separates drafting from sending. The agent creates the exact email in the user's mailbox, but the user can still edit or delete it before send.
+
+The production recipe:
+
+- **Build a plain object first.** `to`, `subject`, `body`, and `headers` are easier to validate before you encode the RFC 2822 message.
+- **Idempotency header.** Add `X-Idempotency-Key` derived from the normalized email. Store that same key in your run log so reruns can detect duplicate drafts.
+- **One Gmail write per approved lead.** Approval is the boundary. Draft creation does not run during dry-run.
+- **Keep the body plain text.** Plain text survives inbox clients and review flows better than generated HTML.
+
+### Sandbox · Build the Gmail draft object
+
+<Sandbox
+  id="m22-build-email-draft"
+  mode="js"
+  prompt={<>Implement <code>buildEmailDraft({"{ lead, subject, body }"})</code>. The lead shape is <code>{"{ email, first_name, last_name }"}</code>. Return <code>{"{ to: lead.email, subject, body, headers: { 'X-Idempotency-Key': stableKey } }"}</code>, where <code>stableKey</code> is derived from <code>lead.email</code> and stays the same for the same email. The verifier checks shape, key stability, and that the draft body contains the message text.</>}
+  starter={`function buildEmailDraft({ lead, subject, body }) {
+  // your code here
+}
+
+return buildEmailDraft;`}
+  test={testBuildEmailDraft}
+  hint={<>Normalize the email with <code>trim().toLowerCase()</code>. A simple key like <code>{"'gmail-draft:' + normalizedEmail"}</code> is enough for this exercise. Return the body unchanged.</>}
+/>
+
+</Section>
+
+<Section id="eval" num={8} title="Eval setup">
+
+The golden set for this agent:
+
+- **10 real past leads** for whom you actually wrote and sent cold emails. The original email you sent is the reference.
+- **The same research inputs** that were available at the time. Snapshot Potter responses if they have changed since.
+- **<a href="/m/evaluation#glossary-llm-as-judge">LLM-as-judge</a> rubric.** Score on tone, specificity, subject quality, length, and absence of LLM-tells. Each on a 1-5 scale; aggregate into a final score.
+- **Hard fail on banned tokens.** Any body containing an em dash, "just wanted to", or "i came across" auto-fails regardless of judge score.
+
+Run the eval before every meaningful change: new system prompt, new model version, new few-shots, or new research source. Watch the median score and the worst case; both have to hold.
+
+### Sandbox · Pre-flight check
+
+<Sandbox
+  id="m22-pre-flight-check"
+  mode="js"
+  prompt={<>Implement <code>preFlightCheck({"{ message, subject }"})</code> returning <code>{`{ ok: boolean, blockers: string[] }`}</code>. Block if: subject is empty or longer than 80 characters (mention "subject"); message contains em dash or en dash (mention "dash"); message has more than 3 sentences (mention "sentence"); message contains any banned phrase from "just wanted to", "i came across", "i hope this", "circling back", "reaching out to", "touching base" (mention "banned" or "phrase"). <code>ok</code> is true only when blockers is empty.</>}
+  starter={`function preFlightCheck({ message, subject }) {
+  const blockers = [];
+  // your code here
+  return { ok: blockers.length === 0, blockers };
+}
+
+return preFlightCheck;`}
+  test={testPreFlight}
+  hint={<>Four checks. Subject: <code>subject.trim().length &gt; 0 &amp;&amp; subject.length &lt;= 80</code>. Sentence count: <code>message.match(/[.!?]+/g)?.length || 0</code>. Banned phrases: lowercase the message, check substring against the list. Em dash: <code>{'/[\\u2014\\u2013]/.test(message)'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="deploy" num={9} title="Deployment">
+
+Two deployment shapes:
+
+- **Standalone Node CLI.** The script above, run from a terminal. `node cold-email.js leads.csv --dry-run`. Easiest to use ad-hoc.
+- **n8n workflow.** A trigger node feeds the lead list into a Code node that runs the same loop. Slack posts the dry-run thread. Approval comes through Slack interactivity routed back into the workflow.
+
+The Gmail side needs OAuth with the `gmail.compose` scope for draft creation. Store refresh tokens in your secrets manager, not in the repo. Log the Gmail draft id after creation so the Slack review thread, run log, and mailbox can be reconciled.
+
+</Section>
+
+<Section id="what-broke" num={10} title="Iteration log: what broke">
+
+The real cold-email failure modes from building this:
+
+- **DKIM/SPF setup missing.** Emails landed in spam because the sending domain was not authenticated. Fix the domain setup before you measure copy quality.
+- **Gmail rate limits at high volume.** Free accounts are capped at 500 sends/day. This module creates drafts, but the approved send path still needs volume-aware pacing.
+- **Draft API quota.** Gmail draft writes consume API quota, and the relevant ceiling is 250 quota units per user per second. Batch draft creation with backoff instead of a firehose loop.
+- **Apify rate limits during research phase.** The bottleneck can show up before Claude or Gmail. Queue Potter research, cache recent results, and retry with jitter.
+- **Persona drift across the batch.** Without prompt caching, tone drifted as examples changed. Caching the system prompt and few-shot set kept the voice stable.
+- **Few-shot bleed-through.** Specific phrases from examples appeared verbatim in new emails. Mitigation: rotate the few-shots periodically and reject repeated phrasing in evals.
+- **Email normalization.** Case differences and whitespace created duplicate draft attempts. Normalize emails at ingest and use the normalized address for idempotency.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">This agent is Potter-heavy by design</h3>
+
+    <p>Per lead, the loop calls <code>potter_research_person</code>, <code>potter_research_company</code>, <code>potter_find_decision_maker</code> when the imported lead is not the right person, and <code>potter_summarize_linkedin_posts</code> to find a recent post worth referencing. The Potter calls run in parallel; merging the results gives the agent enough material to write something specific.</p>
+
+    <p>Potter does the data work; the agent assembles the email. Without Potter, this agent would re-implement several data integrations and scrape paths before it ever wrote a subject line. Potter collapses that research into a clean tool surface.</p>
+
+    <p>The split that makes the architecture clean: Potter is stateless data fetching; the harness is the agent loop, prompt caching, dry-run gate, audit log, Slack review, and Gmail draft creation. Potter does not know which mailbox the draft is going into; the harness does not need to know how the research providers are rate-limited. Each layer does one job.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-dry-run" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">dry-run flag</p><p className="text-sm text-ink-700">Mandatory --dry-run mode that logs what would happen without creating Gmail drafts.</p></div>
+  <div id="glossary-gmail-draft" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Gmail draft</p><p className="text-sm text-ink-700">An email saved in the user's Gmail Drafts folder through the Gmail API, not sent automatically.</p></div>
+  <div id="glossary-dkim-spf" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">DKIM/SPF</p><p className="text-sm text-ink-700">Domain authentication records that help receiving mail servers trust that a sender is legitimate.</p></div>
+  <div id="glossary-persona-matched" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">persona-matched</p><p className="text-sm text-ink-700">Email generation tuned to a specific user's voice via system prompt and few-shot examples.</p></div>
+  <div id="glossary-pre-flight" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">pre-flight check</p><p className="text-sm text-ink-700">Validation pass before any external write to catch bad subject lines, banned phrases, or body shape errors.</p></div>
+  <div id="glossary-llm-tell" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">LLM-tell</p><p className="text-sm text-ink-700">A phrase that makes text read machine-written, such as "just wanted to" or "touching base".</p></div>
+  <div id="glossary-idempotency-key-per-lead" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">idempotency key per lead</p><p className="text-sm text-ink-700">Stable key, usually derived from normalized email, preventing the same lead from being processed twice.</p></div>
+  <div id="glossary-outbound-dry-run" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">outbound dry-run</p><p className="text-sm text-ink-700">Agent produces all emails but does not create Gmail drafts until a human approves.</p></div>
+  <div id="glossary-persona-drift" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">persona drift</p><p className="text-sm text-ink-700">Voice drifts across a batch as prompt context changes. Mitigated by system prompt caching and stable few-shots.</p></div>
+  <div id="glossary-gmail-api-quota" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Gmail API quota</p><p className="text-sm text-ink-700">Per-user and per-project API limits that require pacing and retry behavior when creating drafts in batches.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m22-q1" question="1. Why is the dry-run flag mandatory before Gmail draft creation?">
+Draft creation is an external write into a real mailbox. Dry-run logs to Slack for human review before that write happens. The cost of pausing is small; the cost of filling a mailbox with bad drafts is real.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q2" question='2. What does "persona-matched" email generation mean and how do you achieve it?'>
+Output that reads like the user wrote it. Achieved with a tight system prompt of voice rules plus 3 to 5 few-shot examples of the user's actual past emails. Prompt caching keeps the voice stable across the batch.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q3" question="3. What subject-line rule does pre-flight enforce?">
+Subject must be non-empty and 80 characters or less. Long or blank subjects are blocked before Gmail draft creation.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q4" question="4. Why create Gmail drafts instead of sending automatically?">
+Drafts keep the useful automation while preserving human control over final send. The agent handles research, writing, validation, and draft creation; the human can edit, delete, or send.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q5" question="5. Cost per lead order of magnitude?">
+About $0.10 in Potter providers plus about $0.04 in LLM with caching. Gmail API draft creation is free at normal volume. A 50-lead batch is roughly $7 in variable cost.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q6" question="6. How do you keep voice consistent across a batch of 50?">
+Cache the system prompt and few-shot examples. The stable prefix keeps voice rules and examples identical across leads while the per-lead research changes.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q7" question="7. What banned phrases does the pre-flight check enforce?">
+"just wanted to", "i came across", "i hope this", "circling back", "reaching out to", "touching base", plus em dashes and bodies over 3 sentences. The list grows when new tells appear in production output.
+</CheckQuestion>
+
+<CheckQuestion id="m22-q8" question="8. How does this agent compose with M23 and M24?">
+M22's lead list can come from M23's funding monitor. M24's meeting prep can fire after the outbound thread books a meeting. The three form a loop: monitor surfaces companies, outreach drafts emails, meeting prep researches the room.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You shipped the cold-email drafter: Potter research, persona-matched composition, pre-flight gate, Gmail draft object, and dry-run boundary. The next agent flips the trigger shape from "list arrives" to "schedule fires": a weekly funding monitor.
+
+<CompleteBanner moduleId="m22" nextSlug="gtm-agent-2" nextTitle="Module 23 - GTM agent: weekly funding monitor" />
+
+</Section>
+
+<ModuleNav prevSlug="coding-agents" prevTitle="Module 21 - Coding agents in depth" nextSlug="gtm-agent-2" nextTitle="Module 23 - GTM agent: weekly funding monitor" />

@@ -1,0 +1,376 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  CodingAgentMatrixDemo,
+  SpecDrivenStepper,
+  testPickCodingAgent,
+  testValidateSpec
+} from './m21-coding-agents';
+
+<ModuleHero
+  kicker="Module 21 · Coding agents in depth"
+  title="The most-watched category"
+  lead="Coding agents are the most-watched category of agent products. Claude Code, Codex CLI, Cursor, Aider, Devin lineage. SWE-bench is the public scoreboard. Knowing what each does, how they differ, and when to reach for which one is now part of being a working engineer."
+  trackId="applied"
+  moduleId="m21"
+/>
+
+<Toc items={[
+  { href: '#what-makes-different', label: 'What makes a coding agent different' },
+  { href: '#claude-code-depth', label: 'Claude Code in depth' },
+  { href: '#codex', label: 'Codex CLI' },
+  { href: '#cursor', label: 'Cursor' },
+  { href: '#aider', label: 'Aider' },
+  { href: '#devin', label: 'Devin and the autonomous-engineer lineage' },
+  { href: '#swe-bench', label: 'SWE-bench and the eval shape' },
+  { href: '#spec-driven', label: 'Spec-driven coding workflows' },
+  { href: '#multi-agent', label: 'Multi-agent for coding' },
+  { href: '#picking', label: 'Picking a coding agent' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-makes-different" num={1} title="What makes a coding agent different">
+
+A general agent decides what tool to call. A <GLink slug="coding-agent">coding agent</GLink> decides what change to make. The shape of the work is genuinely different:
+
+- **File system as state.** The agent's "memory" is the working tree. Edits persist across turns; a bad edit is visible immediately; the next turn reads the modified files.
+- **Tests as eval.** The cheapest, most reliable feedback signal is "the test suite passes". Iterating against tests is much faster than iterating against open-ended judgments.
+- **Git as reversibility.** Every change is recoverable. The agent can experiment more freely than agents that touch external systems with non-reversible side effects.
+- **Iteration cost.** Running tests is the slow loop. CI pipelines, linting, type-checking are all part of the wall time. The agent's tool choices have to account for this.
+
+These properties make coding agents tractable in ways general agents are not. They also make benchmarks (SWE-bench specifically) more meaningful: a coding agent's success or failure can be measured objectively against a real-world task, in a way that "did the agent help with the meeting" cannot.
+
+</Section>
+
+<Section id="claude-code-depth" num={2} title="Claude Code in depth">
+
+[Module 8](/m/claude-code-surface) covered the extension surface (skills, plugins, hooks, slash commands). This section is about the workflow patterns.
+
+The patterns that actually ship features:
+
+- **Spec-then-implement.** Write the spec in a doc, hand it to Claude Code, ask for a plan, review the plan, then implement. The spec discipline is what makes the agent's output predictable.
+- **Test-driven.** Tell the agent to write tests first. The tests become the acceptance criteria; the implementation has to satisfy them. This catches misunderstandings before they become buggy code.
+- **Plan-mode-then-edit.** Use plan mode (the model writes the plan but does not edit) for non-trivial work. Review the plan; ask follow-up questions; then exit plan mode and let the agent execute.
+- **Subagents for boundary work.** Spin up a subagent for a research pass (read the codebase, find all the call sites, summarize) before the main agent makes edits. Keeps the main agent's context focused.
+- **Hooks for guardrails.** PostToolUse hooks running tests on every edit, PreToolUse hooks blocking accidental destructive commands. The harness enforces what the agent should not be trusted to enforce alone.
+
+A practical example, in a single session:
+
+<CodeBlock lang="md">{`User: Read specs/sign-in-form.md and write a plan to implement it.
+Claude Code: [reads spec, writes plan, lists files to touch]
+
+User: Plan looks good. Implement it. Make sure to add the tests first.
+Claude Code: [creates test files, then implementation, runs tests, fixes failures]
+
+User: Run the linter.
+Claude Code: [runs linter, fixes warnings]
+
+User: Open a PR.
+Claude Code: [opens PR with summary linking to spec]`}</CodeBlock>
+
+The discipline: short turns, explicit acceptance criteria, the spec as the contract.
+
+</Section>
+
+<Section id="codex" num={3} title="Codex CLI">
+
+OpenAI's <GLink slug="codex-cli">Codex CLI</GLink>. The two everyday entry points:
+
+- **Interactive mode.** Run `codex` in a terminal for a chat-and-edit loop similar to Claude Code's interactive session.
+- **`codex exec` (non-interactive).** Pass a prompt; the agent runs autonomously, edits files, runs tests, and summarizes. This is the entry point used for CI integrations and for review-shaped runs (e.g., `codex exec "review the diff against main and flag issues"`). The Claude Code `codex-plugin-cc` plugin wraps this exec path so you can launch Codex review runs from inside a Claude Code session.
+
+Where Codex specifically wins:
+
+- **Image-to-code.** OpenAI's vision-strong models pair with Codex for "here's a screenshot of the design; build it." Useful for UI scaffolding from mockups.
+- **Broad code reviews.** Cross-file consistency checks, design-doc audits, the "second opinion" pass that catches things you missed.
+- **Plugin ecosystem.** Codex has its own plugin model (similar in spirit to Claude Code's, distinct in details). Useful when you need OpenAI-specific integrations.
+
+When Claude Code beats Codex:
+
+- **Tool-use reliability for agent loops.** Claude Code's stop-and-tool patterns are mature.
+- **Anthropic-aligned stacks.** When your model preference is Claude, the harness alignment matters.
+- **Extension surface depth.** Hooks, skills, plugins, MCP attachment all in one place ([Module 8](/m/claude-code-surface)).
+
+</Section>
+
+<Section id="cursor" num={4} title="Cursor">
+
+<GLink slug="cursor-agent">Cursor</GLink> is an editor (a VS Code fork) with a built-in agent mode. The shape that distinguishes it:
+
+- **In-editor pair-programming.** The agent works alongside you in real-time. Inline suggestions, agent runs that edit files in place, chat that has full repo context.
+- **Rules files.** Per-project agent configuration lives in `.cursor/rules/*.mdc` (the current format; the older `.cursorrules` single-file form is deprecated and being phased out). Each `.mdc` file holds coding style, libraries to prefer, things to avoid. Maintains agent behavior across sessions and team members.
+- **Agent vs chat.** Cursor distinguishes "chat" (you ask, it answers) from "agent mode" (it runs autonomously, edits files, runs commands). Both have their place.
+
+When Cursor wins:
+
+- **Real-time iteration.** You want feedback as you type, agent runs that touch the files you are looking at, chat with full repo context without leaving the editor.
+- **Team-shared rules.** A repo with established patterns benefits from `.cursor/rules/*.mdc` files that every team member's Cursor reads.
+- **GUI-driven workflows.** Engineers who prefer an editor over a terminal find Cursor a more natural fit than Claude Code or Aider.
+
+When Cursor loses:
+
+- **Heavy automation workflows.** When you want hooks, scheduled tasks, or programmatic agent runs, terminal-native tools (Claude Code, Aider) fit better.
+- **Lightweight repos.** The editor overhead is not always worth it for quick CLI-shaped work.
+
+</Section>
+
+<Section id="aider" num={5} title="Aider">
+
+<GLink slug="aider">Aider</GLink> is a terminal-driven coding agent with a strict diff-based edit workflow.
+
+What sets it apart:
+
+- **<GLink slug="diff-style">Diff-style edits</GLink>.** The agent's output is expressed as diffs to the working tree. Applied atomically; rejected if the patch does not apply cleanly. Forces the agent to be specific about what it is changing.
+- **REPL-shaped UX.** You stay in a chat loop in the terminal; ask for changes; review; continue. Lower friction than Claude Code's session model for one-off edits.
+- **Repo-aware out of the box.** Sends a repo map to the model so it knows the project structure without you having to tell it.
+- **Provider-flexible.** Works with Claude, GPT, Gemini, OpenRouter, local models. Useful when you want a coding agent without committing to one provider.
+
+When Aider wins:
+
+- **Quick edits.** Open the terminal, describe the change, accept the diff. Lower overhead than starting a Claude Code or Cursor session.
+- **Provider portability.** Switch models with a config flag.
+- **Minimal-surface workflows.** Engineers who want a chat-and-diff loop without the additional surface area of a full IDE or extension framework.
+
+When Aider loses:
+
+- **Long-form planning.** Other tools have richer plan modes and subagent patterns.
+- **Hook-driven CI integration.** Claude Code's hook surface is more mature.
+
+</Section>
+
+<Section id="devin" num={6} title="Devin and the autonomous-engineer lineage">
+
+<GLink slug="devin">Devin</GLink> launched the "autonomous engineer" category: a long-running agent that takes a task description, works on it for hours, and opens its own pull request. Cognition's framing was "AI software engineer"; the SWE-bench numbers got attention; the actual product behavior got more nuanced reviews.
+
+The shape:
+
+- **Hosted.** You log into a UI, file a task, watch the agent work. Not a CLI you run locally.
+- **Long-running.** Hours per task. The agent reads the codebase, plans, edits, tests, iterates.
+- **<GLink slug="autonomous-pr">Autonomous PR</GLink> at the end.** The deliverable is a GitHub PR with the agent's diff and summary. You review.
+
+Where Devin-class agents work well:
+
+- **Well-specified medium-sized tasks.** Add a feature with clear requirements; refactor a bounded piece; write tests for a module.
+- **Background work queues.** You file a batch of tasks; the agent works through them; you review the PRs.
+- **First-pass implementation.** Even when the result needs revision, getting to "first draft of the change" is often the hardest part.
+
+Where they consistently fail:
+
+- **Implicit specs.** "Make this better" is not enough; the agent invents requirements that may not match yours.
+- **Domain-knowledge-heavy tasks.** When the right answer requires understanding business context the codebase does not explain, the agent flounders.
+- **Complex debugging.** The bug-fixing loop on production-grade systems often requires the kind of reasoning that the agent does not yet do reliably.
+
+The 2026 lineage includes several entrants in this space; capabilities and quality are improving. The right framing today: useful for queueing work, not a replacement for engineering judgment.
+
+</Section>
+
+<Section id="swe-bench" num={7} title="SWE-bench and the eval shape">
+
+<GLink slug="swe-bench">SWE-bench</GLink> is a public benchmark that takes real GitHub issues from open-source projects, has the agent attempt to fix them, and scores by whether the resulting patch makes the project's tests pass. SWE-bench Verified is a curated subset cleaned of ambiguous cases.
+
+Why it matters:
+
+- **Real-world tasks.** Not synthetic; not toy. Issues from real projects with real tests.
+- **Objective scoring.** A test suite passes or it does not. No LLM-judge bias.
+- **Public scoreboard.** Comparison across coding agent products and approaches.
+
+The caveats:
+
+- **One benchmark.** Real codebases have shapes SWE-bench does not test. Frontend-heavy work, long-context cross-cutting changes, debugging-heavy workflows are underrepresented.
+- **Test quality varies.** Some passing patches are technically correct but architecturally bad. The benchmark cannot judge that.
+- **Context window matters.** Higher SWE-bench scores often come with larger context budgets, which production agents may not have.
+- **Test gaming.** Some agents have learned to detect SWE-bench-style tasks and behave specifically for them. Read scores critically.
+
+The honest framing: SWE-bench scores are useful as a directional signal for a category of work. Stating "this agent scores X%" tells you something; it does not tell you "this agent will improve your team by Y%". Verify on your own codebase with your own evals before committing.
+
+</Section>
+
+<Section id="spec-driven" num={8} title="Spec-driven coding workflows">
+
+<GLink slug="spec-driven-coding">Spec-driven coding</GLink> is the workflow that makes coding agents reliable. The core move: write the spec first, then have the agent implement against it.
+
+Why it works:
+
+- **Reduces "looks plausible but wrong" rate.** A spec tells the agent (and you) what success means before any code is written. Without it, the agent invents requirements; with it, you catch misunderstandings cheaply.
+- **Makes review cheaper.** Reading a diff against a known spec is fast; reading a diff to figure out what it was supposed to do is slow.
+- **Becomes the eval.** The spec's acceptance criteria become behavioral test cases ([Module 16](/m/evaluation)); they catch regressions in CI.
+- **Surfaces ambiguity.** Writing the spec forces you to decide things you might otherwise punt on. The act of writing reveals where the requirements are unclear.
+
+The minimum viable spec:
+
+<CodeBlock lang="md">{`# Goal
+One sentence: what does success look like?
+
+# In scope
+- specific feature 1
+- specific feature 2
+
+# Out of scope
+- thing the agent should NOT do
+- thing that is part of a different ticket
+
+# Acceptance criteria
+- [ ] testable bullet 1
+- [ ] testable bullet 2
+- [ ] testable bullet 3
+- [ ] (at least 3, more for non-trivial work)`}</CodeBlock>
+
+<SpecDrivenStepper />
+
+### Sandbox · Validate a spec
+
+<Sandbox
+  id="m21-write-spec-first"
+  mode="js"
+  prompt={<>Implement <code>validateSpec(spec)</code> returning <code>true</code> only if <code>spec</code> has all required fields: <code>goal</code> (any truthy value), <code>in_scope</code> (must be an array), <code>out_of_scope</code> (array), and <code>acceptance_criteria</code> (array of length at least 3). Return <code>false</code> otherwise. <code>null</code> or non-object inputs return <code>false</code>.</>}
+  starter={`function validateSpec(spec) {
+  // your code here
+}
+
+return validateSpec;`}
+  test={testValidateSpec}
+  hint={<>Check object-ness, then each field. Acceptance criteria: <code>Array.isArray(spec.acceptance_criteria) &amp;&amp; spec.acceptance_criteria.length &gt;= 3</code>.</>}
+/>
+
+</Section>
+
+<Section id="multi-agent" num={9} title="Multi-agent for coding">
+
+The planner / implementer / reviewer pattern: one agent plans, one implements, one reviews. Sometimes useful; often overhead.
+
+When it pays off:
+
+- **Larger PRs.** When the work is too big for one context, splitting across agents (each with its own context budget) lets the system handle bigger tasks.
+- **Independent perspectives.** A reviewer agent that did not see the implementation work catches different things than the implementer would catch about its own work.
+- **Specialization.** A planner trained on planning, an implementer trained on implementation, a reviewer trained on review. The current state is "same model, different prompts" but the framing is useful even there.
+
+When it is overhead:
+
+- **Smaller changes.** A 50-line bug fix does not need three agents.
+- **Tight feedback loops.** When you want iteration speed, multi-agent introduces handoff latency.
+- **Shared context costs.** Running three agents on the same codebase means three reads of the codebase, three context budgets, three sets of API costs.
+
+The pattern that often works: one agent in plan mode produces the plan, you review it, then a single agent implements. The "second pass" review is cheaper as a separate agent run after the implementation, when you already have the diff to look at.
+
+### Sandbox · Pick the coding agent
+
+<Sandbox
+  id="m21-pick-coding-agent"
+  mode="js"
+  prompt={<>Implement <code>pickCodingAgent(task)</code> returning <code>"claude-code"</code>, <code>"codex"</code>, <code>"cursor"</code>, <code>"aider"</code>, or <code>"devin"</code>. Mappings: <code>"solo-terminal-iteration"</code> -&gt; <code>"claude-code"</code>; <code>"broad-pr-review"</code> -&gt; <code>"codex"</code>; <code>"in-editor-pair"</code> -&gt; <code>"cursor"</code>; <code>"quick-diff-edit"</code> -&gt; <code>"aider"</code>; <code>"long-autonomous-pr"</code> -&gt; <code>"devin"</code>. Default for unknown kinds: <code>"claude-code"</code>.</>}
+  starter={`function pickCodingAgent(task) {
+  // your code here
+}
+
+return pickCodingAgent;`}
+  test={testPickCodingAgent}
+  hint={<>Object map plus a fallback to claude-code (the most general-purpose default for terminal-driven coding work).</>}
+/>
+
+</Section>
+
+<Section id="picking" num={10} title="Picking a coding agent for the job">
+
+The decision tree, condensed:
+
+- **Solo dev iterating in a terminal.** Claude Code or Aider. Claude Code if you want the extension surface (hooks, skills, plugins); Aider if you want minimal-surface diff-based edits.
+- **Pair-programming in an IDE.** Cursor.
+- **Broad code review or image-to-code.** Codex.
+- **Long-running autonomous PR.** Devin or one of the autonomous-PR successors.
+- **Mixed.** Most working engineers use multiple. Claude Code for daily implementation work; Cursor for in-editor pair sessions; Codex for review passes; Devin for queued background tasks.
+
+<CodingAgentMatrixDemo />
+
+The honest framing: the tool that fits is the tool you actually open every day. A team that aligns on Cursor will out-ship a team that picks the "objectively best" tool that no one uses. Pick by daily-use comfort first; capability second.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter was built with Claude Code as the primary harness</h3>
+
+    <p>The spec discipline is what made Potter tractable as a 25-tool MCP server: one capability spec per major version, schema-typed tools, concrete acceptance criteria, no LLM inside MCP except the deliberate <code>potter_browser_act</code> exception ([Module 13](/m/browser-automation)). The pattern is exactly what M21 recommends: write the spec first, then have the coding agent implement against it.</p>
+
+    <p>Potter is also the case study for "tools as artifacts your coding agent helps you build", distinct from "harness as product". The coding agent is how Potter got built; Potter is the tool layer the harness consumes. Each capability spec was a Module 21-style artifact: goal, in-scope, out-of-scope, acceptance criteria. Each tool was implemented against its spec. Each addition was reviewed before the next started.</p>
+
+    <p>The lesson, applied to anyone building a non-trivial agent system: write specs, use a coding agent that respects them, run tests as eval, review diffs against the spec. The specs make the work tractable; the coding agent makes the implementation fast; the tests keep the quality honest.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-coding-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">coding agent</p><p className="text-sm text-ink-700">An agent specialized for code: file system as state, tests as eval, git as reversibility.</p></div>
+  <div id="glossary-swe-bench" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">SWE-bench</p><p className="text-sm text-ink-700">Public benchmark for coding agents using real GitHub issues.</p></div>
+  <div id="glossary-spec-driven-coding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">spec-driven coding</p><p className="text-sm text-ink-700">Workflow where the spec is written first and the agent implements against it.</p></div>
+  <div id="glossary-aider" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Aider</p><p className="text-sm text-ink-700">Terminal-driven coding agent with diff-based edit workflow.</p></div>
+  <div id="glossary-devin" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Devin</p><p className="text-sm text-ink-700">Cognition's autonomous coding agent that ships GitHub PRs.</p></div>
+  <div id="glossary-cursor-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Cursor</p><p className="text-sm text-ink-700">Editor with built-in agent mode and rules files.</p></div>
+  <div id="glossary-codex-cli" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Codex CLI</p><p className="text-sm text-ink-700">OpenAI's coding agent CLI. Interactive mode plus a non-interactive `codex exec` entry point used for review-shaped runs and CI integrations.</p></div>
+  <div id="glossary-claude-code-coding" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Claude Code</p><p className="text-sm text-ink-700">Anthropic's terminal-based coding agent harness. Module 8 covers the extension surface.</p></div>
+  <div id="glossary-diff-style" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">diff-style edit</p><p className="text-sm text-ink-700">Agent edits expressed as diffs to the working tree, applied atomically.</p></div>
+  <div id="glossary-plan-mode" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">plan mode</p><p className="text-sm text-ink-700">Mode where the agent writes a plan but does not execute changes.</p></div>
+  <div id="glossary-autonomous-pr" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">autonomous PR</p><p className="text-sm text-ink-700">Long-running agent that opens its own pull request.</p></div>
+  <div id="glossary-pair-program-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">pair-program agent</p><p className="text-sm text-ink-700">Agent that works alongside a developer in real-time, suggesting and applying edits.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m21-q1" question="1. What makes a coding agent different from a general agent?">
+File system as state, tests as eval, git as reversibility, iteration cost (running tests is the slow loop). The shape of "the work" is genuinely different from a general agent's tool decisions, which makes coding agents tractable in ways general agents are not.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q2" question="2. When does Aider beat Claude Code?">
+When you want minimal-friction quick edits via diff, especially in environments without the full Claude Code extension surface. Aider's REPL-shaped UX has lower overhead for one-off edits. Claude Code wins when you want hooks, skills, plugins, or MCP attachment.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q3" question="3. SWE-bench score caveat?">
+It is one benchmark, on real but specific GitHub issues. Scores may not transfer to your codebase, your stack, or your kind of work. Read scores critically: a high SWE-bench number is a directional signal, not a guarantee the agent will improve your team.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q4" question="4. Spec-driven coding: why bother?">
+Tells the agent (and you) what success means before any code is written. Reduces the "looks plausible but wrong" rate. Makes review faster because you can compare the diff against the spec instead of figuring out what the change was for. The spec also becomes the basis for behavioral tests.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q5" question="5. Multi-agent for coding: when does it pay off?">
+Larger PRs where planner / implementer / reviewer benefit from separated contexts. Independent reviewer perspectives that catch what the implementer missed. Smaller changes: overhead beats value; one agent in plan mode plus one implementation pass is usually faster.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q6" question="6. Why is Potter's case relevant to M21?">
+Built using Claude Code as the primary harness. Spec discipline (one capability spec per major version, concrete acceptance criteria) is what made a 25-tool MCP server tractable as agent-built work. The pattern of spec-first-implement-second is what M21 recommends, and Potter is the case study for it.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q7" question="7. Pair-program agent vs autonomous PR: when each?">
+Pair-program when the engineer wants iteration-time feedback and tight collaboration in the editor. Autonomous PR when the work is well-specified and the engineer reviews the diff at the end rather than during. The framing: pair-program for exploratory work; autonomous PR for queueable bounded tasks.
+</CheckQuestion>
+
+<CheckQuestion id="m21-q8" question="8. Devin-class agents: what do they consistently get wrong?">
+Long-context tasks where the spec is implicit, anything that requires real-world judgment, complex debugging that needs domain knowledge the codebase does not contain. They handle well-specified medium-sized tasks; they struggle when "make this better" is the actual instruction.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the coding-agent playbook: what makes them different, the major products, SWE-bench critique, spec-driven workflows, multi-agent trade-offs, and the picking-by-daily-use heuristic. The course continues with the applied GTM agent builds in M22 through M24, then closes with the Potter case study in M25.
+
+<CompleteBanner moduleId="m21" nextSlug="gtm-agent-1" nextTitle="Module 22 · GTM agent build #1" />
+
+</Section>
+
+<ModuleNav prevSlug="open-source-models" prevTitle="Module 20 · Open source models and Hugging Face" nextSlug="gtm-agent-1" nextTitle="Module 22 · GTM agent build #1" />

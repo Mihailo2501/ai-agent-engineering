@@ -1,0 +1,359 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  EvalPyramidDemo,
+  JudgeWalkthroughDemo,
+  testEvalToolSelection,
+  testPickEvalShape,
+  testWriteLlmJudge
+} from './m16-evaluation';
+
+<ModuleHero
+  kicker="Module 16 · Evaluation and testing"
+  title="Eval is what tells you it works"
+  lead="Most agent failures slip through because nobody had a way to know they were failures. Eval is what tells you whether the agent works. Built right, it catches regressions before users do. Built wrong, it produces false confidence and you ship anyway."
+  trackId="production"
+  moduleId="m16"
+/>
+
+<Toc items={[
+  { href: '#why-hard', label: 'Why agent eval is harder' },
+  { href: '#golden', label: 'Golden datasets' },
+  { href: '#exact-vs-judge', label: 'Exact-match vs LLM-as-judge' },
+  { href: '#behavioral', label: 'Behavioral evals' },
+  { href: '#regression', label: 'Regression across model versions' },
+  { href: '#tools', label: 'promptfoo, Braintrust, Anthropic eval' },
+  { href: '#redteam', label: 'Red-team and adversarial' },
+  { href: '#prod-eval', label: 'Continuous eval in production' },
+  { href: '#tool-eval', label: 'Eval for tool use' },
+  { href: '#failures', label: 'Common eval failures' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="why-hard" num={1} title="Why agent eval is harder than chat eval">
+
+A chat completion has one input and one output. You can run the same input twice and compare. Agent eval has more dimensions:
+
+- **Multi-step.** The agent calls tools, reads results, makes more calls, summarizes. Did it pick the right path? Did it recover when a tool failed? Did it stop at the right time?
+- **Tool-call branching.** Two runs with the same prompt may legitimately take different paths if both succeed. Comparing transcripts directly fails; the right unit of comparison is "did the agent satisfy the goal," not "did the transcript match."
+- **Open-ended outputs.** Most agent outputs are prose, structured documents, code edits, or actions. Exact-match scoring is rarely the right tool.
+- **Stochastic.** Even at temperature 0, sampling-related drift means two runs can differ. Eval has to account for normal variance.
+- **Stateful.** The same agent on day 1 and day 2 has different memory, different episodic context, sometimes a different model version under the hood.
+
+The patterns in this module work in spite of all that.
+
+<EvalPyramidDemo />
+
+</Section>
+
+<Section id="golden" num={2} title="Golden datasets: building one that lasts">
+
+A <GLink slug="golden-dataset">golden dataset</GLink> is the fixed set of inputs and expected outputs your agent is supposed to handle. Most teams underinvest here; the dataset stays small, becomes stale, and stops catching real failures.
+
+The principles that make a dataset useful:
+
+- **Representative.** Cases drawn from real user behavior, not synthetic. Mine your production logs (with PII redacted) for a starting set.
+- **Edge-case heavy.** Happy-path cases tell you when nothing has changed. Edge cases tell you when something is breaking. Weight the dataset toward cases that have caused trouble.
+- **Stable expected outputs.** Each case has a known good answer (for exact-match) or a known-good rubric score (for LLM-judge). Update when the truth changes; never when the agent's behavior changes.
+- **Tagged for slicing.** Tag cases by category, difficulty, customer segment. Lets you spot regressions in one slice without watching every case individually.
+- **Versioned in your repo.** A JSON or YAML file the team reviews on PRs. The dataset is part of your codebase.
+
+The lifecycle: start with 50 cases. After every incident, add the surfaced failure as a case. After every prompt or model change, re-run; if a case starts failing for the wrong reason, fix the agent or move the case to a "known-issue" bucket. The dataset grows by accretion; never throw cases away unless they are objectively wrong.
+
+</Section>
+
+<Section id="exact-vs-judge" num={3} title="Exact-match vs LLM-as-judge">
+
+Two scoring shapes; pick by the shape of "right" for your task.
+
+<GLink slug="llm-as-judge">LLM-as-judge</GLink> beats exact match when:
+
+- **Multiple valid answers.** "Summarize this document" has many acceptable summaries; exact-match scores all of them as wrong.
+- **Format flexibility.** "List the top 3 risks" can be bulleted, numbered, or prose; the content matters more than the formatting.
+- **Paraphrase robustness.** A correct answer phrased differently than your reference is still correct; exact match flags it.
+- **Multi-criterion scoring.** "Did it fix the bug, follow style guide, add a test, and write a sensible commit message?" is a rubric, not a single string compare.
+
+Exact match wins when:
+
+- **Single canonical answer.** "What is 2 + 2?" → 4. "What is the capital of France?" → Paris. Cheap, deterministic, no judge call needed.
+- **Classification.** Label is one of a fixed set; correctness is exact match against the true label.
+- **Extraction with known fields.** A schema-shaped extraction can be field-by-field exact-matched if the source contains canonical values.
+
+Judge prompt design:
+
+- **Force tool use** ([Module 12](/m/structured-output#tool-extract)) so the score and rationale come back parseable.
+- **Tight rubric** with explicit scale anchors ("5 = factually correct and well-written; 3 = correct but poorly phrased; 1 = factually wrong").
+- **Calibrated against humans** on a 50 to 200 case sample before you trust it. Cohen's kappa or simpler agreement-within-1-point is the metric.
+- **Stable across runs.** Judge with the same model version, the same prompt, the same temperature; otherwise comparisons across time mean nothing.
+
+<JudgeWalkthroughDemo />
+
+### Sandbox · Build a numeric LLM judge
+
+<Sandbox
+  id="m16-write-llm-judge"
+  mode="anthropic"
+  prompt={<>Use <code>claude(opts)</code> to score whether a candidate answer to <em>"What is the capital of France?"</em> is correct. The reference is "Paris". Send the candidate response <code>"The capital of France is Paris."</code>. Use a tool named <code>submit_score</code> with schema <code>{`{ score: number }`}</code> where <code>score</code> is 1 to 5 (5 = correct and clearly stated, 1 = wrong or absent). Force the model to call the tool. Parse the tool_use input and return <code>score</code> as a number.</>}
+  starter={`const tools = [{
+  name: 'submit_score',
+  description: 'Submit a 1 to 5 score for the candidate answer.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      score: { type: 'number', description: 'integer 1 to 5' }
+    },
+    required: ['score']
+  }
+}];
+
+const reference = 'Paris';
+const candidate = 'The capital of France is Paris.';
+
+const response = await claude({
+  system: 'You score candidate answers against a reference on a 1 to 5 scale. 5 means factually correct and clearly stated; 1 means wrong or missing. Use the submit_score tool.',
+  messages: [{
+    role: 'user',
+    content: \`Question: What is the capital of France?\\nReference: \${reference}\\nCandidate: \${candidate}\\nScore the candidate.\`
+  }],
+  tools,
+  tool_choice: { type: 'tool', name: 'submit_score' },
+  max_tokens: 256
+});
+
+// find the tool_use block, return its input.score
+const block = /* your code */;
+
+return block.input.score;`}
+  test={testWriteLlmJudge}
+  hint={<>The structure is the same as M12: <code>response.content.find(b =&gt; b.type === "tool_use").input.score</code>. The point of the exercise is the judge prompt, not the parsing.</>}
+/>
+
+</Section>
+
+<Section id="behavioral" num={4} title="Behavioral evals: did the agent do the right thing?">
+
+A <GLink slug="behavioral-eval">behavioral eval</GLink> scores the path, not just the destination. For an agent, that means:
+
+- **Tool selection accuracy.** Did the agent pick the expected tool? With the right arguments?
+- **Multi-step plan correctness.** When the task needed three steps, did the agent take three sensible steps?
+- **Recovery from errors.** When a tool failed (mocked or real), did the agent retry, fall back, or escalate appropriately?
+- **stop_reason as expected.** Did it stop on `end_turn` (work done) versus `max_tokens` (truncated) versus `stop_sequence`?
+
+The scoring shape: structured rubric over the trace. For a tool-selection eval, score by `name match (+1) + args match (+0.5)` summed over expected calls and divided by the max possible.
+
+### Sandbox · Score tool selection
+
+<Sandbox
+  id="m16-eval-tool-selection"
+  mode="js"
+  prompt={<>Implement <code>evalToolSelection(expected, actual)</code> where each is an array of <code>{`{ name, args }`}</code>. Reward each correct name with +1 and each correct args object with +0.5. Args match means same keys, same primitive values (use shallow equality). The denominator is the max possible: <code>expected.length * 1.5</code>. Return total / max as a number in [0, 1].</>}
+  starter={`function evalToolSelection(expected, actual) {
+  // your code here
+}
+
+return evalToolSelection;`}
+  test={testEvalToolSelection}
+  hint={<>For each expected entry at index i, compare to actual[i]. Add 1 if names match. Add 0.5 if names match AND args match (shallow equality). Divide by <code>expected.length * 1.5</code>.</>}
+/>
+
+</Section>
+
+<Section id="regression" num={5} title="Regression tests across model versions">
+
+When the underlying model changes, agent behavior changes. The pattern:
+
+- **Pin model versions** in production. Do not let your stack auto-upgrade silently.
+- **Keep your golden dataset** as the regression suite. Re-run on every model change before flipping.
+- **Score deltas** per case and aggregate. A 5% drop in median score is a candidate regression; a 30% drop is a definite one.
+- **Slice by category.** A model that improves overall but tanks one customer segment is a regression for that segment.
+- **Promote gradually.** Roll out the new model to 5% of traffic, monitor production sampling scores, expand if scores hold.
+
+The classic story: "Sonnet 4.7 to 4.8 broke us." A model upgrade silently changed tool-selection behavior on a niche case; production sampling caught it three days later; the team rolled back. Without the golden dataset and the production sampling, the fix would have taken weeks instead of days.
+
+</Section>
+
+<Section id="tools" num={6} title="promptfoo, Braintrust, Anthropic eval tooling">
+
+The tooling landscape in 2026, briefly:
+
+- **<GLink slug="promptfoo">promptfoo</GLink>.** Open-source CLI plus YAML config. Run a battery of prompts against multiple providers; compare outputs. Strong for prompt iteration; works as a behavioral eval engine with custom assertions.
+- **<GLink slug="braintrust">Braintrust</GLink>.** Hosted platform. Datasets, eval runs, version comparison, judge prompts. Used by teams that want a UI and a hosted dashboard for eval results without building one. Strong on traceable diffs across runs.
+- **Anthropic eval tooling.** First-party datasets, judge prompts, and integration with the Workbench. Useful when you are Anthropic-aligned and want native tooling that understands the model's behavior.
+- **Inngest, Trigger.dev's eval features.** If you are already running background agents on these platforms, their built-in eval features are convenient.
+- **Roll your own.** A JSON dataset in your repo, a script that runs the agent over it, a script that runs the judge over the outputs. Works fine for small teams; the cost of platform tooling is integration overhead, not capability.
+
+The choice depends less on the tool and more on whether anyone on the team will actually use it. A simple script that runs every PR is more valuable than a fancy platform that nobody opens.
+
+</Section>
+
+<Section id="redteam" num={7} title="Red-team and adversarial evals">
+
+<GLink slug="red-team-eval">Red-team eval</GLink> is the dataset of inputs designed to make your agent fail. Different goal, different prompts, different scoring. [Module 18](/m/security-adversarial) goes deep; here the eval-side rule:
+
+- **Separate dataset.** Red-team cases live in their own file. They have different scoring (binary safe/unsafe, not a 1-5 quality scale).
+- **Real attempts.** Inputs that real attackers would send, plus the postmortem-derived attempts that have hit production already.
+- **Track over time.** A drop in red-team pass rate is a signal as serious as a quality regression. Treat it as a release blocker.
+- **Coverage.** Prompt injection (direct and indirect), jailbreak attempts, edge-case extraction, malformed inputs, role override attempts, capability leakage probes.
+
+The trap: a red-team set that passes 100% feels like proof of safety. It is proof that your set is too small. Real safety is "we have a process for adding new red-team cases as new attacks appear" rather than "the existing set is clean."
+
+</Section>
+
+<Section id="prod-eval" num={8} title="Continuous eval in production">
+
+Eval that runs only on PRs catches the changes you knew about. Production eval catches the drift you did not.
+
+The pattern:
+
+- **Sample real traffic.** Maybe 1 to 5% of requests. Higher for critical paths; lower for high-volume cheap paths.
+- **Run the judge.** Same judge prompt as the golden set. Score the response.
+- **Write to observability.** Score, model version, agent version, run_id. Goes into your dashboard.
+- **Alert on drift.** Rolling-window decline in score triggers a page. Specific case-categories declining triggers more targeted alerts.
+- **Grow the golden set.** Sampled cases that score badly are candidates for the golden dataset, with humans confirming the expected output.
+
+[Module 19](/m/observability) ties this to deployment: <GLink slug="production-sampling">production sampling</GLink> is one of the signals on the agent observability dashboard, alongside latency, cost, and error rate.
+
+### Sandbox · Pick the eval shape
+
+<Sandbox
+  id="m16-pick-eval-shape"
+  mode="js"
+  prompt={<>Implement <code>pickEvalShape(task)</code> returning <code>"exact-match"</code>, <code>"llm-judge"</code>, <code>"behavioral"</code>, or <code>"human-review"</code>. Mappings: <code>"extraction-with-known-answer"</code> -&gt; <code>"exact-match"</code>; <code>"open-ended-response-quality"</code> -&gt; <code>"llm-judge"</code>; <code>"multi-step-tool-use-correctness"</code> -&gt; <code>"behavioral"</code>; <code>"safety-critical-edge-cases"</code> -&gt; <code>"human-review"</code>; <code>"classification-accuracy"</code> -&gt; <code>"exact-match"</code>. Default for unknown kinds: <code>"llm-judge"</code>.</>}
+  starter={`function pickEvalShape(task) {
+  // your code here
+}
+
+return pickEvalShape;`}
+  test={testPickEvalShape}
+  hint={<>Object map plus a fallback. The intuition: known answer -&gt; exact-match; tool path -&gt; behavioral; open prose -&gt; llm-judge; safety -&gt; humans.</>}
+/>
+
+</Section>
+
+<Section id="tool-eval" num={9} title="Eval for tool use specifically">
+
+Tool use breaks in particular ways. Score for each:
+
+- **Tool selection.** Did the agent pick the right tool from a catalog? When two tools could do the job, did it pick the more efficient one?
+- **Argument correctness.** Are the args the right shape, the right values, the right schema? An agent that picks the right tool but passes wrong args fails downstream.
+- **Recovery from tool error.** When the tool returned `{ is_error: true, kind: "rate_limited" }`, did the agent back off and retry? Did it pick a fallback tool?
+- **Termination.** Did the agent stop calling tools when the work was done, or did it loop on stale state?
+
+The eval data shape:
+
+<CodeBlock lang="json">{`{
+  "id": "case_001",
+  "input": "Find the CTO of Acme",
+  "expected_calls": [
+    { "name": "research_company", "args": { "domain": "acme.com" } },
+    { "name": "find_decision_maker", "args": { "company_id": "...", "role": "CTO" } }
+  ],
+  "expected_stop_reason": "end_turn"
+}`}</CodeBlock>
+
+The scoring code reads the agent trace, extracts actual tool calls, scores against expected_calls, checks stop_reason. Aggregate over the dataset; track over time.
+
+</Section>
+
+<Section id="failures" num={10} title="Common eval failures">
+
+A short field guide to what goes wrong with eval programs:
+
+- **Dataset overfit.** Agent does great on the eval set, mediocre in production. The set was too narrow. Mine production logs for harder cases.
+- **<GLink slug="judge-agreement">Judge bias</GLink>.** Judge consistently rewards or penalizes a pattern humans do not. Calibrate periodically; pin the judge prompt and version.
+- **Golden set staleness.** "Correct" answers from six months ago are wrong now (the API changed, the product moved, language drifted). Schedule periodic dataset reviews; rotate stale items.
+- **Ignoring tail behaviors.** Median quality looks fine; the worst 5% of cases are catastrophic. Track p95 and worst-case, not just averages.
+- **Eval as theatre.** A dashboard nobody looks at. Tie eval results to release decisions; build alarms on drift; treat eval failures as blockers.
+- **One-shot eval.** Run once at launch, never again. Make eval a permanent part of CI and production observability.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter eval lives at two layers</h3>
+
+    <p>Layer 1: schema validation at the MCP boundary. Every Potter tool's output is validated against its declared schema. Structural drift (a provider returning a new field, a missing required key) is caught before the agent sees the data. This is unit-level eval at the tool layer.</p>
+
+    <p>Layer 2: agent-level eval at the consuming harness. Whether the right tools fired, whether the brief matches what a sales engineer would write, whether the agent recovered when a tool returned a structured error. This eval is the harness's responsibility because what counts as "right" depends on the use case (a research brief is judged differently than a meeting prep digest).</p>
+
+    <p>The split is intentional. Potter ships clean structured outputs that any eval framework can introspect. The eval itself, the rubric, the golden dataset, the judge prompt, lives where the use case lives. Coupling the eval to the tool layer would force every consumer of Potter to share the same definition of quality, which they do not.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-golden-dataset" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">golden dataset</p><p className="text-sm text-ink-700">Fixed set of inputs with known expected outputs used as the eval baseline.</p></div>
+  <div id="glossary-llm-as-judge" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">LLM-as-judge</p><p className="text-sm text-ink-700">Using a model to score another model's output against a rubric.</p></div>
+  <div id="glossary-behavioral-eval" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">behavioral eval</p><p className="text-sm text-ink-700">Eval that scores whether the agent took the right actions, not just whether the final answer was right.</p></div>
+  <div id="glossary-regression-test" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">regression test</p><p className="text-sm text-ink-700">Re-running the eval suite against a new model version to catch drift.</p></div>
+  <div id="glossary-judge-agreement" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">judge agreement</p><p className="text-sm text-ink-700">How often the LLM judge and a human reviewer agree on the same response.</p></div>
+  <div id="glossary-rubric" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">rubric</p><p className="text-sm text-ink-700">Structured scoring criteria for the judge prompt.</p></div>
+  <div id="glossary-dataset-drift" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">dataset drift</p><p className="text-sm text-ink-700">Production inputs diverging from the golden dataset over time.</p></div>
+  <div id="glossary-promptfoo" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">promptfoo</p><p className="text-sm text-ink-700">Open-source eval framework for prompts and agents.</p></div>
+  <div id="glossary-braintrust" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Braintrust</p><p className="text-sm text-ink-700">Hosted eval platform for LLM apps.</p></div>
+  <div id="glossary-eval-pyramid" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">eval pyramid</p><p className="text-sm text-ink-700">Layered testing strategy: unit, behavioral, golden, red-team, production sampling.</p></div>
+  <div id="glossary-red-team-eval" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">red-team eval</p><p className="text-sm text-ink-700">Adversarial inputs designed to trigger failures (injection, jailbreak, edge cases).</p></div>
+  <div id="glossary-production-sampling" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">production sampling</p><p className="text-sm text-ink-700">Running judge prompts against a fraction of real traffic for ongoing eval.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m16-q1" question="1. Why is agent eval harder than chat completion eval?">
+Multi-step, tool-call branching, open-ended outputs, stochastic, stateful. A chat completion has one input and one output; an agent has many decisions, many side effects, and runs differ legitimately even at the same temperature. The eval has to score the path, not just the destination.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q2" question="2. When does LLM-as-judge beat exact match?">
+Whenever there is more than one acceptable answer. Open-ended generation, paraphrase robustness, format flexibility, multi-criterion scoring. Exact match wins when the answer is canonical and singular: classification labels, factual lookups, schema-shaped extractions.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q3" question="3. How do you grow a golden dataset over time?">
+Mine production traces. Surface mistakes (real failures, incident postmortems). Add them to the dataset with the correct expected output. Watch for stale items where the truth has changed; rotate them out. The dataset grows by accretion; never throw cases away unless they are objectively wrong.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q4" question="4. Behavioral eval: what does it actually score?">
+Did the agent pick the correct tool? Were the arguments right? Did it recover from errors? Did stop_reason match expectation? In other words, did it take the right path, not just produce the right final string. This is what catches "the answer looks right but the agent took a stupid route to get there".
+</CheckQuestion>
+
+<CheckQuestion id="m16-q5" question="5. Two judges with different prompts disagree. What do you do?">
+Calibrate against human reviewers on a sample of 50 to 200 cases. The judge that better predicts human ratings (Cohen's kappa or simple agreement rate) is the one to keep. Pin its prompt and model version; comparisons across time are only meaningful when the judge is held constant.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q6" question="6. Production sampling: cost vs benefit?">
+Costs API calls per sampled request (1 to 5% of traffic typical). Benefits: catches drift the eval suite missed, surfaces real failures from real distribution, builds golden examples from real bad cases. The cost is small; the visibility is the difference between knowing what is happening in production and guessing.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q7" question="7. Why is red-team eval its own category?">
+Adversarial inputs probe failure modes the happy-path suite never touches. Different goal (find failures, not measure quality), different prompts (hostile, edge case), different scoring (binary safe/unsafe). Bundling it with the quality eval suite produces a single number that hides both signals.
+</CheckQuestion>
+
+<CheckQuestion id="m16-q8" question="8. Where does Potter's eval live?">
+Two layers. Schema validation at the MCP boundary catches structural drift before the agent sees bad data; that is unit-level eval at the tool layer. Agent behavior eval (right tools fired, brief matches expectations) lives in the consuming harness because what counts as "right" depends on the use case.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the eval discipline: pyramid, golden dataset, judge calibration, behavioral scoring, regression tests, production sampling. The next module is the other production constraint that decides whether a working agent is shippable: cost economics.
+
+<CompleteBanner moduleId="m16" nextSlug="cost-economics" nextTitle="Module 17 · Cost economics" />
+
+</Section>
+
+<ModuleNav prevSlug="async-agents" prevTitle="Module 15 · Background and async agents" nextSlug="cost-economics" nextTitle="Module 17 · Cost economics" />

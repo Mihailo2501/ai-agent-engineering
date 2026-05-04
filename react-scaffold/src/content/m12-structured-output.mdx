@@ -1,0 +1,391 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  SchemaBuilder,
+  ThreeModesDemo,
+  testExtractWithTool,
+  testPickOutputMode,
+  testValidate
+} from './m12-structured-output';
+
+<ModuleHero
+  kicker="Module 12 · Structured output"
+  title="Three ways to ask, ranked by reliability"
+  lead="Sometimes you need text. Sometimes you need an object. The model can produce both, and the API has three ways to ask for the second: prompt-only, response_format with a schema, and tool use as an extraction shape. Knowing which to reach for is a small skill that pays out forever."
+  trackId="building"
+  moduleId="m12"
+/>
+
+<Toc items={[
+  { href: '#three-ways', label: 'Three ways to get structured output' },
+  { href: '#prompt-only', label: 'Prompt-only structured output' },
+  { href: '#response-format', label: 'JSON mode and response_format' },
+  { href: '#tool-extract', label: 'Tool use as extraction' },
+  { href: '#schema-design', label: 'Schema design for structured output' },
+  { href: '#validation', label: 'Zod, Pydantic, ArkType' },
+  { href: '#tool-vs-format', label: 'When tool use beats response_format' },
+  { href: '#failures', label: 'Common failure modes' },
+  { href: '#streaming', label: 'Streaming partial structured output' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="three-ways" num={1} title="Three ways to get structured output">
+
+Free-text generation is what models do by default. <GLink slug="structured-output">Structured output</GLink> is what production systems need: a JSON object with named fields the rest of your code can parse without surprises. The API has three different ways to ask, in increasing reliability:
+
+<Mermaid chart={`flowchart LR
+  Q["need structured output?"] -->|no| FREE["return text, you parse"]
+  Q -->|yes| MODE{"which mode?"}
+  MODE -->|quick prototype| PO["prompt-only<br/>'output JSON: ...'"]
+  MODE -->|production extraction| RF["response_format<br/>schema-constrained"]
+  MODE -->|mid-loop or<br/>decide-then-extract| TU["tool use as extraction<br/>force_tool_choice"]
+  PO --> WORKS{"works?"}
+  WORKS -->|usually| OK["ship it"]
+  WORKS -->|fails under stress| RF
+  RF --> OK
+  TU --> OK`} />
+
+<p className="text-sm text-ink-500">Decision tree. Reliability goes up as you commit to more API support; complexity does too.</p>
+
+The three modes side by side:
+
+<ThreeModesDemo />
+
+The rest of this module unpacks each mode and the schema design + validation work that holds across all three.
+
+</Section>
+
+<Section id="prompt-only" num={2} title="Prompt-only structured output">
+
+The cheapest version: ask the model in plain English. `Output JSON. Schema: { amount: number, currency: string, vendor: string }. Do not wrap in code fences.`
+
+When prompt-only works:
+
+- Simple, flat shapes (3 to 5 fields, primitive types).
+- Cooperative inputs (the source text contains the values clearly).
+- Quick prototypes where reliability SLA does not exist yet.
+
+When prompt-only breaks:
+
+- Long inputs. The further the schema is from the model's recent attention, the more it drifts.
+- Deep schemas. Nested objects, arrays of objects, conditional fields all increase the chance the model produces something that almost-but-does-not-quite parse.
+- max_tokens. The model produces partial JSON when it hits the cap. Recovering from partial JSON is parser-fight territory.
+- Cross-version drift. A prompt that worked on yesterday's model variant produces slightly different output on tomorrow's. Without API-side schema enforcement, you only catch the drift in production.
+
+The "good enough" zone is real and worth using when it applies. The mistake is shipping prompt-only at a scale where reliability matters.
+
+</Section>
+
+<Section id="response-format" num={3} title="JSON mode and response_format">
+
+A step up: tell the API to validate the model's output against a schema. The exact shape varies across providers:
+
+- **Anthropic Structured Outputs.** Pass an `output_config.format` with `type: "json_schema"` and your schema. The model is constrained at decoding time so the response is guaranteed to parse and match the schema. Available on Opus 4.7/4.6/4.5, Sonnet 4.6/4.5, and Haiku 4.5. This is the path Anthropic now recommends for strict structured output.
+- **OpenAI response_format with json_schema.** Pass a JSON Schema; the API validates strictly. The model output is guaranteed to parse and to match the schema (or the call fails).
+- **Other providers.** Most major providers ship a "JSON mode" flag and increasingly support full schema validation. Verify per-provider when you commit.
+
+When schema-constrained output wins:
+
+- Production extraction. Schema-constrained, validated server-side, no markdown wrap, no partial output.
+- Long inputs where prompt-only would drift. The schema acts as an anchor across long context.
+- Multi-call pipelines where downstream code expects exact shapes.
+
+When the tool-use pattern still wins:
+
+- The model needs to "explain itself" in addition to extracting. Structured-output mode gives you only the object; tool use lets you have a text turn first.
+- The model is choosing between extraction and another action mid-loop. Tool use lets the model decide; structured-output mode forces extraction.
+- The schema changes per call (one-off shapes, dynamic fields). The setup overhead is wrong for a single use.
+
+Both Anthropic and OpenAI now support strict schema validation; tool use remains a portable cross-provider option even where structured-output mode is unavailable.
+
+</Section>
+
+<Section id="tool-extract" num={4} title="Tool use as an extraction pattern">
+
+A pattern that works on every provider that supports tools, including the case where the model needs to choose between extraction and other actions mid-loop:
+
+1. Define a tool whose schema is your target output shape.
+2. Force the model to call it with `tool_choice: { type: "tool", name: "submit_x" }`.
+3. Pull the input object out of the resulting `tool_use` block.
+
+Why this still earns a place even with native structured outputs available:
+
+- Tool calling is universal across providers and models. Every model that supports tool use can be coerced into structured output this way; useful when your stack spans providers with uneven structured-output support.
+- The model often emits a text turn before the tool call ("Let me extract the fields..."), which acts as a soft chain-of-thought and improves quality on hard inputs.
+- Schema validation is the same machinery as regular tool calls, which means it benefits from every reliability improvement the providers ship for tool use.
+- It composes with normal agent loops: the same model can choose between extraction and another action when you do not force tool_choice, by leaving multiple tools available.
+
+A complete example:
+
+<CodeBlock lang="ts">{`const tools = [{
+  name: 'submit_invoice',
+  description: 'Submit extracted invoice fields. Use when the user provides invoice text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      amount: { type: 'number', description: 'Total amount, no currency symbol' },
+      currency: { type: 'string', enum: ['USD', 'EUR', 'GBP'] },
+      vendor: { type: 'string', description: 'Vendor name, trimmed' }
+    },
+    required: ['amount', 'currency', 'vendor']
+  }
+}];
+
+const response = await client.messages.create({
+  model: 'claude-opus-4-7',
+  max_tokens: 256,
+  tools,
+  tool_choice: { type: 'tool', name: 'submit_invoice' },
+  messages: [{
+    role: 'user',
+    content: 'Extract the invoice details from: "Paid $1,250 USD to Acme Corp."'
+  }]
+});
+
+const block = response.content.find(b => b.type === 'tool_use');
+const invoice = block.input;  // { amount: 1250, currency: 'USD', vendor: 'Acme Corp' }`}</CodeBlock>
+
+### Sandbox · Extract with a forced tool call
+
+<Sandbox
+  id="m12-extract-with-tool"
+  mode="anthropic"
+  prompt={<>Define a tool named <code>submit_invoice</code> with schema <code>{'{ amount: number, currency: string, vendor: string }'}</code>. Send a user message: <em>"Extract the invoice details from this text: 'Paid $1,250 USD to Acme Corp.'"</em>. Force the model to call your tool with <code>tool_choice: {'{ type: "tool", name: "submit_invoice" }'}</code>. Walk <code>response.content</code> for the <code>type: "tool_use"</code> block and return its <code>input</code> field. Verifier checks <code>amount === 1250</code>, <code>currency === "USD"</code>, and <code>vendor</code> contains "Acme" (case-insensitive).</>}
+  starter={`const tools = [{
+  name: 'submit_invoice',
+  description: 'Submit extracted invoice fields. Use when the user provides invoice text.',
+  input_schema: {
+    type: 'object',
+    properties: {
+      amount: { type: 'number', description: 'Total amount, no currency symbol' },
+      currency: { type: 'string', description: 'ISO 4217 currency code, e.g. USD' },
+      vendor: { type: 'string', description: 'Vendor or supplier name, trimmed' }
+    },
+    required: ['amount', 'currency', 'vendor']
+  }
+}];
+
+const response = await claude({
+  messages: [
+    { role: 'user', content: "Extract the invoice details from this text: 'Paid $1,250 USD to Acme Corp.'" }
+  ],
+  tools,
+  tool_choice: { type: 'tool', name: 'submit_invoice' },
+  max_tokens: 256
+});
+
+// find the tool_use block; return its input
+const invoice = /* your code */;
+
+return invoice;`}
+  test={testExtractWithTool}
+  hint={<><code>{'response.content.find(b => b.type === "tool_use").input'}</code>. Forcing tool_choice removes the chance the model returns a text answer instead of calling the tool.</>}
+/>
+
+</Section>
+
+<Section id="schema-design" num={5} title="Schema design for structured output">
+
+Same skills as the schema design in [Module 10](/m/tool-design#schemas), applied to result shapes instead of input shapes. The patterns that matter most for extraction:
+
+- **Required fields first, optional second.** Keep the required list lean; every required field is one more thing the model must fill correctly.
+- **Default values via description.** The schema's `default` is rarely enforced. Document defaults in field descriptions ("If omitted, defaults to USD.") so the model can fill what makes sense.
+- **Enums for closed sets.** `currency: { type: "string", enum: ["USD", "EUR", "GBP"] }` is more reliable than free-form with "must be one of" in the description.
+- **Nested objects sparingly.** Each level of nesting increases the chance of failure under stress. Flatten when reasonable; nest only when the structure genuinely matches the data.
+- **Per-field descriptions.** Each property gets its own description. Treat each one like a small tool description; the model reads it when filling values.
+
+<SchemaBuilder />
+
+</Section>
+
+<Section id="validation" num={6} title="Validation libraries: Zod, Pydantic, ArkType">
+
+Even with API-side schema enforcement, validate on your side. The pattern is defense in depth: the API validates against the schema you sent, but your code has its own expectations (stricter types, business rules, derived constraints) that the schema does not capture.
+
+The tools that fit:
+
+- **<GLink slug="zod">Zod</GLink>** (TypeScript). The de facto standard. Schemas are runtime-checked and TypeScript-typed in one shot. `z.object({ amount: z.number().positive(), currency: z.enum(['USD', 'EUR']) })`.
+- **<GLink slug="pydantic">Pydantic</GLink>** (Python). The Python equivalent. Heavily used in agent frameworks (LangChain, LlamaIndex, FastAPI integrations).
+- **<GLink slug="arktype">ArkType</GLink>** (TypeScript). Newer Zod alternative with compile-time type alignment that does not require code generation. Less ecosystem but cleaner for some shapes.
+
+Why client-side validation even with API-side schema:
+
+- The API can return data that passes the schema you sent but violates a constraint your schema cannot express (e.g., `amount > 0`, `vendor != ""`, `endDate > startDate`).
+- Schema drift: you edited the API-side schema in one place but forgot the type in your code; client-side validation catches the mismatch immediately.
+- Provider differences: response_format strict mode varies; client-side validation is consistent across providers.
+
+### Sandbox · Implement a tiny validator
+
+<Sandbox
+  id="m12-validate-with-zod-shape"
+  mode="js"
+  prompt={<>Implement <code>validate(obj, schema)</code> returning an object with <code>ok</code> (boolean) and <code>errors</code> (string array) fields. Schema is a record of field name to <code>{'{ type, required }'}</code>, where <code>type</code> is one of <code>"string"</code>, <code>"number"</code>, or <code>"boolean"</code> and <code>required</code> is a boolean. Rules: missing required field is an error mentioning the field name. Type mismatch is an error mentioning the field name and the expected type. Optional fields missing are allowed. Extra unknown fields are allowed by default. Empty errors array means <code>ok: true</code>.</>}
+  starter={`function validate(obj, schema) {
+  const errors = [];
+  // your code here
+  return { ok: errors.length === 0, errors };
+}
+
+return validate;`}
+  test={testValidate}
+  hint={<>Iterate <code>Object.entries(schema)</code>. For each field: if <code>required</code> and not present, push an error mentioning the field. If present and <code>typeof obj[field] !== spec.type</code>, push an error mentioning the field and expected type. Return <code>{'{ ok: errors.length === 0, errors }'}</code>.</>}
+/>
+
+</Section>
+
+<Section id="tool-vs-format" num={7} title="When tool use beats response_format">
+
+Even with response_format available, tool use often wins. When:
+
+- **The schema is part of a larger agent decision.** When the model can choose between extracting (call submit_x) and doing something else (call other_tool, ask a clarifying question, return text), tool use is the natural shape. response_format forces extraction; tool use lets the model decide.
+- **You want a reasoning text turn before the structured output.** Tool use lets the model emit a text block ("Let me think about this...") before the tool_use block. This often improves extraction quality on hard inputs. response_format is structure-only.
+- **You want to compose with the agent loop.** Tool use is the same machinery as any other tool call. Logging, evals, observability tooling that handles tool_use blocks already handles your extraction.
+- **You are spanning multiple providers.** Tool use is the lowest-common-denominator path that works on Anthropic, OpenAI, and most others. Useful when your stack already routes across providers and uneven structured-output support would force per-provider branches.
+
+When response_format wins back:
+
+- Single-purpose extraction calls where the model has nothing to decide.
+- Provider-strict mode (OpenAI's strict json_schema) for cases where API-level validation absolutely must catch every malformed response.
+- Pipelines where keeping tool calls "real tools" and structured output "format" is a useful conceptual split for your codebase.
+
+### Sandbox · Pick the output mode
+
+<Sandbox
+  id="m12-pick-output-mode"
+  mode="js"
+  prompt={<>Implement <code>pickOutputMode(task)</code> returning <code>"prompt-only"</code>, <code>"response-format"</code>, or <code>"tool-use"</code>. Mappings: <code>"simple-keyvalue-extraction"</code> -&gt; <code>"response-format"</code>; <code>"extract-or-take-other-action"</code> -&gt; <code>"tool-use"</code>; <code>"quick-prototype-no-sla"</code> -&gt; <code>"prompt-only"</code>; <code>"extract-from-long-document"</code> -&gt; <code>"response-format"</code>; <code>"agent-mid-conversation-with-many-tools"</code> -&gt; <code>"tool-use"</code>. Default for unknown kinds: <code>"response-format"</code>.</>}
+  starter={`function pickOutputMode(task) {
+  // your code here
+}
+
+return pickOutputMode;`}
+  test={testPickOutputMode}
+  hint={<>Object map plus a fallback. The cheap intuition: "is this part of an agent loop?" -&gt; tool-use. "Just extracting?" -&gt; response-format. "Quick test?" -&gt; prompt-only.</>}
+/>
+
+</Section>
+
+<Section id="failures" num={8} title="Common failure modes">
+
+A short field guide to what goes wrong with structured output and how to fix each:
+
+- **<GLink slug="code-fence-wrap">Code fence wrap</GLink>.** The model wraps the JSON in markdown code fences (triple backtick plus `json` then the body then closing backticks). Standard JSON parsers fail on the leading and trailing fences. Mitigations: instruct explicitly ("Output raw JSON, no markdown."), strip fences before parsing, or move to response_format / tool use which do not produce fences.
+- **Prose around the object.** Output like "Here is the data:" followed by the object, and trailing prose after it. Strip everything before the first `{` and after the last matching `}`, or move to response_format / tool use.
+- **<GLink slug="partial-json">Partial JSON</GLink>.** The model hit max_tokens mid-generation. Either raise max_tokens, simplify the schema, or accept partial output and patch it (some libraries support partial-JSON parsing).
+- **Invented fields.** Model added fields the schema does not include. response_format strict mode rejects this. In tool use mode, validate client-side and ignore extras.
+- **Type coercion errors.** "1,250" instead of `1250`; "true" instead of `true`. Better field descriptions ("the amount as a number with no comma or symbol") plus client-side coercion in your validator.
+- **Drift across model versions.** Output shape changes when you upgrade. Pin model versions in production and rerun your eval suite when changing.
+
+</Section>
+
+<Section id="streaming" num={9} title="Streaming and partial structured output">
+
+Streaming structured output is harder than streaming text because partial JSON is not parseable until it is complete. The patterns that work:
+
+- **Field-by-field rendering.** SDKs (Vercel AI SDK, OpenAI SDK partial-json helpers) emit incremental updates for fields as they complete. UI auto-fills as fields stream in.
+- **Optimistic parsing.** Some libraries parse partial JSON by closing dangling brackets and quotes optimistically. Useful for progressive UI; do not act on the parsed value until the stream completes.
+- **Server-side completion.** The simpler default: do not stream the structured output to the user; let the API finish; render the final object. Loses the streaming UX win but keeps parsing simple.
+
+When streaming is worth the extra complexity:
+
+- The user-visible UI auto-fills fields as they arrive (form filling, progressive feedback).
+- Long extractions where waiting for the full result feels broken.
+- Multi-step displays where each field corresponds to a UI element that can render independently.
+
+When streaming is not worth it:
+
+- Backend pipelines where no human is watching.
+- Short outputs that complete in under a second anyway.
+- Cases where partial output could mislead a downstream consumer who acts on incomplete data.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is structured output by design</h3>
+
+    <p>Every Potter MCP tool defines an inputSchema (validated at the boundary by the MCP SDK) and an output shape (documented in the description). The agent never has to parse free text from a Potter tool. The discipline is the same one this module taught: schemas are first-class, validation runs server-side, errors are structured, types match expectations.</p>
+
+    <p>The tool_use pattern from Section 4 is exactly how Potter feels from the consumer side. The harness's model decides to call <code>potter_research_company</code>; Potter validates the input against its schema; runs the work; returns a structured result the agent can read directly. No string parsing, no markdown fences, no partial JSON. The reliability comes from the discipline at the tool layer; the consumer just gets typed objects.</p>
+
+    <p>Module 12's lessons apply both to consuming Potter (parsing structured tool_results without surprises) and to extending Potter (anyone writing a new tool follows the same schema-first discipline). The pattern is the same on both sides of the boundary.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-structured-output" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">structured output</p><p className="text-sm text-ink-700">A model response constrained to a parseable shape (JSON object, typed fields).</p></div>
+  <div id="glossary-json-mode" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">JSON mode</p><p className="text-sm text-ink-700">An API setting that requires the response to be a valid JSON object.</p></div>
+  <div id="glossary-response-format" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">response_format</p><p className="text-sm text-ink-700">API parameter that takes a schema and constrains the response to match.</p></div>
+  <div id="glossary-schema-output" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">schema</p><p className="text-sm text-ink-700">The contract describing the shape and types of a structured response.</p></div>
+  <div id="glossary-force-tool-choice" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">force_tool_choice</p><p className="text-sm text-ink-700">API parameter that requires the model to call a specific tool, used for extraction.</p></div>
+  <div id="glossary-zod" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Zod</p><p className="text-sm text-ink-700">TypeScript schema library used to validate parsed objects on the client side.</p></div>
+  <div id="glossary-pydantic" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Pydantic</p><p className="text-sm text-ink-700">Python equivalent of Zod, popular in agent frameworks.</p></div>
+  <div id="glossary-arktype" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ArkType</p><p className="text-sm text-ink-700">TypeScript schema library with runtime and compile-time type alignment.</p></div>
+  <div id="glossary-extraction" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">extraction</p><p className="text-sm text-ink-700">The pattern of pulling specific fields out of unstructured text into a structured object.</p></div>
+  <div id="glossary-schema-validation" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">schema validation</p><p className="text-sm text-ink-700">Checking that a parsed object matches the expected shape and types.</p></div>
+  <div id="glossary-code-fence-wrap" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">code fence wrap</p><p className="text-sm text-ink-700">Common failure where the model wraps JSON in markdown code fences, breaking parsers.</p></div>
+  <div id="glossary-partial-json" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">partial JSON</p><p className="text-sm text-ink-700">Truncated JSON output, usually from hitting max_tokens mid-generation.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m12-q1" question="1. Three ways to get structured output, ordered by reliability?">
+Prompt-only (lowest, "output JSON: ..."), schema-constrained mode (middle, server-side validation: Anthropic Structured Outputs via `output_config.format`, OpenAI `response_format` with json_schema), tool use as extraction (highest portability across providers, force a "submit_x" tool with a target schema). Each layer adds reliability at the cost of more setup. Anthropic now recommends Structured Outputs for strict extraction; tool use remains the path when the model needs to choose between extraction and other actions, or when your stack spans providers with uneven structured-output support.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q2" question="2. When does prompt-only structured output break?">
+Long context (model attention drifts from the schema), deep schemas (nested objects, arrays of objects), max_tokens cuts (partial JSON), and cross-version drift (output shape changes when you upgrade the model). Works for simple flat shapes in cooperative inputs; fails as soon as any of those conditions bite.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q3" question="3. Why use tool use for extraction instead of response_format?">
+When extraction is one of several possible model actions (extract or take another action), tool use lets the model decide. When you want a reasoning text turn before extraction, tool use allows it. When composing with an agent loop, tool use is the same machinery as every other tool call. response_format wins for single-purpose extraction with no other actions in play.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q4" question="4. What does force_tool_choice do?">
+Forces the model to invoke a specific tool by name. Removes the variability of the model deciding text-vs-tool-use; guarantees a tool_use block in the response. Useful exactly when you want extraction and want it now, with no chance of the model returning prose instead.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q5" question="5. Even with API-side schema validation, why use Zod or Pydantic on the client?">
+Defense in depth. The API validates against the schema you sent; your code has its own expectations (stricter types, business rules like amount &gt; 0, invariants like endDate &gt; startDate) that the JSON Schema cannot fully capture. Client-side validation catches mismatches the API let through.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q6" question='6. Common cause of structured output that "looks right but will not parse"?'>
+Markdown code fence wrap. The model returns a JSON block wrapped in triple-backtick fences (`` ```json {...} ``` ``) and your JSON.parse chokes on the leading and trailing fences. Mitigations: instruct explicitly ("output raw JSON, no markdown"), strip fences before parsing, or move to response_format or tool use which do not produce fences.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q7" question="7. Streaming structured output: when worth it?">
+When the consumer can render fields as they arrive (UI auto-fill in a form, progressive feedback in a long extraction). Otherwise streaming adds parsing complexity (partial JSON is hard to consume) for marginal UX win. Default to non-streaming for backend pipelines and short outputs.
+</CheckQuestion>
+
+<CheckQuestion id="m12-q8" question="8. How does Potter's tool design enforce structured output?">
+Every tool has an inputSchema validated at the MCP boundary; output shapes are documented in tool descriptions. The agent gets typed structured data, not free text. The discipline applies to anyone writing tools for Potter or for their own MCP server: schemas are first-class, validation runs at the boundary, errors are structured. Same lessons as this module, applied as a tool-design rule.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You finished Track 3's first half: tool design, memory, structured output. Track 3 continues with browser automation and async agents in later modules; this module wraps the structured-data half.
+
+<CompleteBanner moduleId="m12" nextSlug="browser-automation" nextTitle="Module 13 · Browser and web automation" />
+
+</Section>
+
+<ModuleNav prevSlug="memory-retrieval" prevTitle="Module 11 · Memory and retrieval" nextSlug="browser-automation" nextTitle="Module 13 · Browser and web automation" />

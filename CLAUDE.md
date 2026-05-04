@@ -18,13 +18,13 @@ A self-paced, open-source course on AI agent engineering. Built around the Claud
 
 These were worked through earlier — do not re-litigate without Mihailo's explicit say-so:
 
-- 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session. The three GTM agent builds in Track 5 (M22 LinkedIn outbound via HeyReach, M23 weekly funding monitor, M24 meeting prep) are one session each because they involve real working agents against Mihailo's actual stack (Potter, HeyReach, Anthropic API, calendar webhooks).
-- **Design system: Clay-inspired (locked 2026-04-30).** Reference mockup at `~/Desktop/aiae-design-pass/aiae-home-a-clay.png`. Pastel multi-hue palette, rounded XL panels, soft drop shadows, friendly robot mascot, per-track pastel grouping. Dark Terminal aesthetic is fully retired; old M01-M03 visual styling will be replaced during the React port. Do not propose alternative aesthetic directions without explicit ask.
+- 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session. The three GTM agent builds in Track 5 (M22 personalized cold email drafter via Gmail drafts, M23 weekly funding monitor, M24 meeting prep) are one session each because they involve real working agents against Mihailo's actual stack (Potter, Gmail API, Anthropic API, calendar webhooks). M22 originally targeted HeyReach but was rewritten to drop paid SaaS dependencies; the loop patterns survived.
+- **Design system: Clay-inspired (locked 2026-04-30).** Reference mockup at `docs/design/aiae-home-clay.png` (gitignored, local-only). Pastel multi-hue palette, rounded XL panels, soft drop shadows, friendly robot mascot, per-track pastel grouping. Dark Terminal aesthetic is fully retired; old M01-M03 visual styling will be replaced during the React port. Do not propose alternative aesthetic directions without explicit ask.
 - localStorage-based progress + badges. Minimum-viable gamification: progress bar, completion checkmarks, light badges. Skip XP, levels, streaks.
 - **Badge taxonomy: 14 total** (5 track-complete + 5 milestones + 4 themed module badges). No per-module badges for the other 21. Renders as a 2x7 grid on the home page badges shelf. Full list and rationale in memory at `project_badges_locked.md`. The starter 7-badge set in `react-scaffold/src/data/badges.ts` will be replaced when artwork is generated.
 - Real CodeMirror 6 sandboxes for hands-on exercises. Two execution modes:
   - In-browser JS for structural exercises (build a tool definition, parse content blocks, write a stop_reason switch)
-  - BYOK Anthropic API for "build a real agent loop" exercises. User's key in localStorage, sent with `anthropic-dangerous-direct-browser-access: true`
+  - BYOK Anthropic API for "build a real agent loop" exercises. User's key lives in `sessionStorage` by default (clears on tab close); a "remember on this device" toggle opts into `localStorage`. Sent with `anthropic-dangerous-direct-browser-access: true`.
 - Diagrams stay Mermaid + hand-written SVG. Visual chrome (badges, hero graphics, illustrative imagery) IS generated via GPT image 2 through Codex. Image generation is for design assets, not for technical diagrams.
 - Public push to GitHub deferred until the course is content-complete. Local-only until then.
 - MIT license matching Potter convention.
@@ -65,7 +65,7 @@ Track 4 — Production (4)
 Track 5 — Applied (6)
   M20  Open source models & Hugging Face — HF Hub, subscription, Ollama, LM Studio, quantization
   M21  Coding agents in depth — Claude Code internals, Codex, Cursor, Aider, SWE-bench
-  M22  GTM agent: LinkedIn outbound via HeyReach (research + persona-matched message + dry-run + enroll)
+  M22  GTM agent: cold email drafter via Gmail drafts (research + persona-matched message + dry-run + create draft)
   M23  GTM agent: weekly funding monitor (cron + ICP filter + Potter research + Slack digest)
   M24  GTM agent: meeting prep (calendar webhook + per-attendee Potter research + Slack DM brief 30 min before)
   M25  Potter case study — three runtimes, design decisions, MCP architecture
@@ -87,48 +87,55 @@ Old → new mapping for the existing M01-M03 content: M01 stays M01; old M02 (Ag
 /
 ├── CLAUDE.md
 ├── README.md
-├── LICENSE                     # MIT
+├── LICENSE                          # MIT
+├── CONTRIBUTING.md
+├── SECURITY.md
+├── CODE_OF_CONDUCT.md
 ├── .gitignore
-├── package.json                # metadata only, no deps
-├── index.html                  # course hub: progress, badges, module list
-├── module-01.html              # one HTML file per module
-├── module-02.html              # ...
-├── module-13.html
-├── css/
-│   └── style.css               # design 3 (dark terminal), single shared stylesheet
-└── js/
-    ├── progress.js             # localStorage progress + completion tracking
-    ├── badges.js               # badge unlock + display
-    ├── sandbox.js              # CodeMirror 6 init, JS exec, Anthropic BYOK
-    └── mermaid-init.js         # Mermaid.js bootstrap
+├── .github/workflows/ci.yml         # typecheck + build on push/PR
+├── docs/design/                     # design references (gitignored mockups)
+└── react-scaffold/                  # the app
+    ├── package.json
+    ├── vite.config.ts
+    ├── index.html                   # SPA shell (head, OG, favicon)
+    ├── public/
+    │   └── illustrations/           # PNGs for modules, tracks, stats, badges
+    └── src/
+        ├── routes.tsx               # all routes
+        ├── pages/                   # home, module pages, glossary
+        ├── components/              # layout, sandbox, mermaid, footer, etc
+        ├── content/                 # one .mdx + one .tsx per module
+        ├── data/                    # modules.ts manifest, badges.ts, glossary
+        └── lib/                     # progress, badges, sandbox/anthropic-client
 ```
 
-File naming is kebab-case throughout. CSS and JS are vanilla. Mermaid is loaded from CDN. CodeMirror 6 is loaded from CDN (no bundler). No Node runtime needed for the course itself.
+File naming is kebab-case throughout. The React app is the only runtime; everything ships through Vite. No vanilla HTML at the project root.
 
 ## Module authoring template
 
-Every module HTML file follows this structure:
+Every module is one `.mdx` file plus one matching `.tsx` in `react-scaffold/src/content/`. The MDX owns prose, callouts, code blocks, mermaid diagrams, and sandbox embeds. The TSX owns interactive demo components, custom widgets, and any per-module React logic the MDX imports. Modules are listed in `src/data/modules.ts` and routed via `src/routes.tsx`.
 
-1. `<head>` — standard, links to `/css/style.css` and `/js/progress.js`, `/js/badges.js`, `/js/sandbox.js`, `/js/mermaid-init.js`
-2. **Hero** — kicker, h1, lead paragraph, progress bar
-3. **Table of contents** — anchor links to sections
-4. **Sections** — h2 numbered, prose, code blocks, callouts, mermaid diagrams, sandboxes
-5. **Sandboxes** — at least 2 per module, real exercises with hidden test verification
-6. **Glossary** — 8 to 12 key terms
-7. **Check yourself** — 6 to 10 click-to-reveal questions
-8. **Module complete** — button that unlocks the next module + awards a badge
-9. **Footer** — module N / 13, link to course hub, link to next module
+Module body structure:
 
-Sessions for Modules 02 to 13 are filling in content against this template, not rebuilding infrastructure. If you find yourself re-architecting JS or CSS during a content module, stop and flag it.
+1. **Hero** (handled by shared `ModuleHero` component): kicker, title, lead paragraph, time estimate, progress strip
+2. **Sections**: numbered `<Section>` blocks, prose, code, callouts, mermaid, sandboxes
+3. **Sandboxes**: at least 2 per module, real exercises with hidden test verification (`<Sandbox>`)
+4. **Glossary terms**: declared inline so the global glossary can index them
+5. **Check yourself**: click-to-reveal questions (`<CheckYourself>`)
+6. **Module complete**: `<CompleteBanner>` that marks completion and awards any badges
+7. **ModuleNav**: prev/next module links
+
+If you find yourself re-architecting layout, sandbox, or progress code during a content module, stop and flag it.
 
 ## Code standards (inherited from global CLAUDE.md)
 
-- JavaScript / vanilla browser. No TypeScript, no bundler, no build step.
+- TypeScript + React 19 + Vite 7. MDX for content. Tailwind 4 for styling.
 - kebab-case file names throughout
-- No silent failures — log full error context to console
-- Single responsibility per JS file
+- No silent failures: log full error context to console
+- Single responsibility per file
 - Prefer editing existing files over creating new ones
 - Don't add features the task did not request
+- Mermaid is lazy-loaded; CodeMirror 6 backs the sandboxes
 
 ## When in doubt
 

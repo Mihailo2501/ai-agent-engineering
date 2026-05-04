@@ -1,0 +1,365 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  CostCalculatorDemo,
+  RoutingVisualizerStepper,
+  testEstimateCost,
+  testPickModel,
+  testBudgetEnforcer
+} from './m17-cost-economics';
+
+<ModuleHero
+  kicker="Module 17 · Cost economics"
+  title="Tokens are not free"
+  lead="A demo agent costs cents. A production agent at scale costs five figures a month. Knowing the math, picking the model wisely, caching aggressively, and routing the cheap turns to cheap models is the difference between a viable product and a money pit."
+  trackId="production"
+  moduleId="m17"
+/>
+
+<Toc items={[
+  { href: '#unit-economics', label: 'Unit economics of an agent call' },
+  { href: '#math', label: 'The napkin math' },
+  { href: '#caching', label: 'Prompt caching' },
+  { href: '#routing', label: 'Model routing' },
+  { href: '#batch', label: 'Batch API' },
+  { href: '#output-discipline', label: 'Output size discipline' },
+  { href: '#hidden', label: 'The hidden multipliers' },
+  { href: '#wrapper-econ', label: 'Wrapper economics' },
+  { href: '#forecast', label: 'Forecasting cost at scale' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="unit-economics" num={1} title="The unit economics of an agent call">
+
+The bill is per token. Three rates per model:
+
+- **<GLink slug="per-token-pricing">Input price</GLink>** for tokens you send (system prompt, tool definitions, messages history, current user message).
+- **<GLink slug="cached-input">Cached input price</GLink>** for tokens that were marked cacheable and the cache is still warm. Roughly 10% of the standard input rate on Anthropic.
+- **Output price** for tokens the model produces. Higher than input, often by a factor of 5x.
+
+A single agent loop iteration looks like:
+
+<CodeBlock lang="ts">{`// Per turn, the API charges:
+// (uncached_input_tokens × input_rate)
+// + (cached_input_tokens × cached_rate)
+// + (output_tokens × output_rate)
+// All rates are per million tokens. Divide accordingly.`}</CodeBlock>
+
+The expensive things to remember:
+
+- **Tool results count as input on the next turn.** A 50K-token tool result eats 50K of input on every subsequent loop iteration.
+- **The system prompt and tool definitions count every turn too.** This is what cache-control fixes.
+- **Output is more expensive than input.** Capping `max_tokens` is one of the cheapest cost wins.
+- **Tokens compound across turns.** A 10-step agent loop with 10K-token messages array averaged across turns is 100K tokens of input billed; cache cuts most of that, but only if you marked the cacheable bits.
+
+</Section>
+
+<Section id="math" num={2} title="The math: napkin estimates that hold up">
+
+A worked example for a research agent:
+
+- Per session: 5 LLM turns. Average 8K input tokens (mostly cacheable system + tool defs + memory). Average 600 output tokens.
+- Cache hit rate: 70% on input across the 5 turns.
+- Per turn: 0.7 × 8K cached + 0.3 × 8K uncached + 600 output.
+- Sonnet rates (illustrative, verify when you commit): $3 input, $0.30 cached, $15 output, all per million.
+- Per turn cost: (5,600 × 0.30 + 2,400 × 3 + 600 × 15) / 1,000,000 = ($1.68 + $7.20 + $9.00) / 1M = ~$0.018.
+- Per session: 5 × $0.018 ≈ $0.09.
+- 1,000 sessions per day, 30 days: $0.09 × 30,000 = $2,700/month.
+
+That estimate is sensitive to caching. Without prompt caching, the same agent costs roughly 2x. Without max_tokens discipline, output bloat doubles the bill again. Without model routing, every turn is on Sonnet (or worse, Opus) when most could be on Haiku for half the price.
+
+<CostCalculatorDemo />
+
+### Sandbox · Estimate the per-call cost
+
+<Sandbox
+  id="m17-estimate-cost"
+  mode="js"
+  prompt={<>Implement <code>estimateCallCost({"{ inputTokens, outputTokens, cachedInputTokens, model }"})</code> in USD. Pricing per million tokens (illustrative, current Anthropic 2026): haiku <code>{`{ input: 1.0, cached: 0.1, output: 5.0 }`}</code>; sonnet <code>{`{ input: 3.0, cached: 0.3, output: 15.0 }`}</code>; opus <code>{`{ input: 5.0, cached: 0.5, output: 25.0 }`}</code>. Cached input is billed at the cached rate, the rest of input at the full rate, output at the output rate. Cached cannot exceed input.</>}
+  starter={`const PRICING = {
+  haiku:  { input: 1.0,  cached: 0.1,  output: 5.0  },
+  sonnet: { input: 3.0,  cached: 0.3,  output: 15.0 },
+  opus:   { input: 5.0,  cached: 0.5,  output: 25.0 }
+};
+
+function estimateCallCost({ inputTokens, outputTokens, cachedInputTokens, model }) {
+  // your code here
+}
+
+return estimateCallCost;`}
+  test={testEstimateCost}
+  hint={<>Clamp cached input first: <code>const cached = Math.min(inputTokens, cachedInputTokens)</code>. Uncached input is <code>max(0, inputTokens - cached)</code>. Multiply each bucket by its rate, divide by 1,000,000, sum.</>}
+/>
+
+</Section>
+
+<Section id="caching" num={3} title="Prompt caching: the highest-leverage optimization">
+
+Across an agent loop, the system prompt and tool definitions do not change between iterations. Without caching, the API prefills them on every turn. With caching, they are billed at roughly 10% of the standard input rate.
+
+How it works on Anthropic:
+
+- **<GLink slug="cache-marker">Cache markers</GLink>.** You add a `cache_control: { type: "ephemeral" }` block to the message content you want cached.
+- **<GLink slug="cache-ttl">Cache TTL</GLink>.** Roughly 5 minutes on the ephemeral cache. Persistent caching may exist on different terms; verify when you commit.
+- **What to mark.** System prompt, tool definitions, the long stable preamble of your conversation. Anything that does not change between turns.
+- **What not to mark.** The current user message, the latest tool result, anything turn-specific.
+
+A sketch:
+
+<CodeBlock lang="ts">{`const response = await client.messages.create({
+  model: 'claude-sonnet-4-6',
+  system: [{ type: 'text', text: SYSTEM_PROMPT, cache_control: { type: 'ephemeral' } }],
+  tools: TOOLS.map(t => ({ ...t, cache_control: { type: 'ephemeral' } })),
+  messages: [
+    { role: 'user', content: 'cached preamble', cache_control: { type: 'ephemeral' } },
+    { role: 'assistant', content: 'previous turn' },
+    { role: 'user', content: 'current question, NOT cached' }
+  ],
+  max_tokens: 1024
+});`}</CodeBlock>
+
+Expected cache hit rate in steady state: 60% to 90% of input tokens, depending on how stable your prompt structure is. The cost cut roughly tracks: at 70% hit rate, total input cost drops to ~33% of uncached.
+
+Two pitfalls:
+
+- **Cache misses on every cold start.** First call after the TTL elapses pays the full input rate. For low-volume agents, the cache may never warm; for high-volume, this is invisible.
+- **Cache invalidation on prompt edits.** Any change to the cached prefix invalidates the cache. Keep edits to the cacheable section batched and rare.
+
+</Section>
+
+<Section id="routing" num={4} title="Model routing: cheap to expensive">
+
+Most agent turns do not need the most capable model. <GLink slug="model-routing">Model routing</GLink> picks the cheapest model that gets the job done.
+
+The standard tiers (<GLink slug="model-tiers">Haiku, Sonnet, Opus</GLink>):
+
+- **Haiku.** Cheap, fast. Right for classification, extraction with known shape, formatting steps, anything where the gap between Haiku and Sonnet is small.
+- **Sonnet.** The production default. Right for most reasoning turns, tool-use decisions, synthesis of structured data.
+- **Opus.** The hardest reasoning. Long planning, ambiguous decisions, hard math. Most production agents call Opus for at most 10% of turns.
+
+Routing logic comes in three flavors:
+
+- **Rule-based.** Per-tool or per-task-kind mapping. "Classifier turn -> Haiku, default -> Sonnet, planning -> Opus." Cheapest to implement; works for most agents.
+- **Score-based.** A small classifier evaluates the difficulty of each input and picks. More work to build; pays off when the same agent handles wildly varied inputs.
+- **Hybrid.** Rule-based with a fallback path: if the cheap model's confidence is low, escalate to a more capable model. Useful when the cost gap is large and confidence signals exist.
+
+<RoutingVisualizerStepper />
+
+### Sandbox · Pick the model for the turn
+
+<Sandbox
+  id="m17-pick-model"
+  mode="js"
+  prompt={<>Implement <code>pickModel(turn)</code> returning <code>"haiku"</code>, <code>"sonnet"</code>, or <code>"opus"</code>. Mappings: <code>"classification"</code> -&gt; <code>"haiku"</code>; <code>"simple-extraction"</code> -&gt; <code>"haiku"</code>; <code>"default-reasoning"</code> -&gt; <code>"sonnet"</code>; <code>"tool-decide"</code> -&gt; <code>"sonnet"</code>; <code>"long-planning"</code> -&gt; <code>"opus"</code>; <code>"hard-math"</code> -&gt; <code>"opus"</code>. Default for unknown kinds: <code>"sonnet"</code>.</>}
+  starter={`function pickModel(turn) {
+  // your code here
+}
+
+return pickModel;`}
+  test={testPickModel}
+  hint={<>Object map plus fallback. The intuition: cheap default, escalate only when the work signals it.</>}
+/>
+
+</Section>
+
+<Section id="batch" num={5} title="Batch API for offline workloads">
+
+The <GLink slug="batch-api-cost">Batch API</GLink> trades latency for price. Anthropic's batch tier processes requests asynchronously at roughly 50% off, with a 24-hour SLA.
+
+Right for:
+
+- **Eval suites.** A nightly run of your golden dataset against the latest model. No user is waiting; cost matters.
+- **Enrichment runs.** Process N rows, each independent, no urgency.
+- **Content generation.** Marketing copy, structured documents, reports.
+- **Periodic background jobs.** Cron-driven workloads from Module 15 fit naturally.
+
+Wrong for:
+
+- **Anything user-facing.** A 24-hour SLA means a user waiting in chat gets nothing for a day. Use real-time inference.
+- **Multi-step agent loops.** Each loop iteration is a separate API call; the batch SLA chains across turns and the wall time becomes infeasible. Batch is for single-shot calls per work item.
+- **Time-sensitive enrichment.** "Refresh this lead before tomorrow's meeting" wants the real-time path.
+
+The architectural fit: anywhere you would use the cron pattern from Module 15, evaluate the batch API. If the work fits the batch shape, the cost cut is significant.
+
+</Section>
+
+<Section id="output-discipline" num={6} title="Output size discipline">
+
+Output costs more than input. Default `<GLink slug="max-tokens">max_tokens</GLink>` values across SDKs are often higher than what most production tasks actually need. The discipline:
+
+- **Cap explicitly.** 100 to 300 for short answers. 500 to 1000 for structured documents. 2000+ for long form, only when it is genuinely needed.
+- **Ask for short answers.** "Answer in one sentence" or "Return only the JSON" cuts wasted tokens.
+- **Structured output beats prose.** Tools and response_format ([Module 12](/m/structured-output)) eliminate the "let me explain" preamble that prose answers love to add.
+- **Summarize for long contexts.** A 50K-token tool result that the agent attends to once is fine. The same result echoed back in the next 5 turns is a $0.50 mistake.
+
+A specific number worth knowing: a chatty model that emits 1,500 tokens when you needed 200 is paying 7.5x for nothing. Cap and watch.
+
+</Section>
+
+<Section id="hidden" num={7} title="The hidden multipliers">
+
+The line items that quietly inflate cost:
+
+- **Tool calls roundtrip.** Every tool call is at least one extra inference round (model emits tool_use, your code runs, you send tool_result, model continues). Each round bills.
+- **Retries.** A retried turn is a re-billed turn. Without idempotency tracking ([Module 15](/m/async-agents)), retries can double cost on flaky paths.
+- **Regenerated thinking blocks.** Extended-thinking models emit thinking content that is billed and not always reused. Verify per model how thinking factors into billing.
+- **Image inputs.** Images cost roughly 1,500 to 3,000 tokens each on standard sizes. Send sparingly ([Module 13](/m/browser-automation#screenshots)).
+- **<GLink slug="context-bloat">Context bloat</GLink>.** Long messages arrays inflate prefill on every turn. Compact aggressively.
+- **Parallel tool use savings.** When the model can request multiple tools in one turn, you save the roundtrip cost. Make sure the harness supports parallel tool use to capture this.
+
+</Section>
+
+<Section id="wrapper-econ" num={8} title="Wrapper economics">
+
+Most "AI feature" startups die on margins. The pattern:
+
+- Charge $20/month for a feature.
+- Average user costs $15/month in tokens.
+- Gross margin is 25%, before any infra, support, sales, or growth costs.
+- Growth requires marketing spend; marketing requires payback windows; payback windows are now infeasible because there is no margin to fund them.
+
+The startups that survive run aggressive optimizations: caching everywhere, model routing on every turn, batch API where possible, max_tokens caps, output discipline. The ones that do not run those optimizations either raise prices (and lose customers) or burn capital until they fold.
+
+When a wrapper has real moats:
+
+- **Distribution.** Users come to you; switching cost is real.
+- **Data flywheel.** Your usage produces data that improves your product and that competitors cannot get.
+- **Workflow integration.** You are deep in a customer's process and replacing you is expensive.
+- **Unique IP on top.** Your prompt design, your eval, your tool catalog are non-trivial to reproduce.
+
+When a wrapper is just middleware:
+
+- **Stateless transformation.** Input goes in, model runs, output comes out. Anyone can copy this.
+- **No proprietary data.** You are the same as a thousand other apps.
+- **No workflow lock-in.** A user can switch in five minutes.
+
+The honest framing: <GLink slug="wrapper-margin">wrapper margins</GLink> are thin by default; the moat is what makes the margin defensible. Without one, the business is one model price drop away from being unviable.
+
+### Sandbox · Build a budget enforcer
+
+<Sandbox
+  id="m17-budget-enforcer"
+  mode="js"
+  prompt={<>Implement <code>enforceBudget({"{ spentUSD, capUSD }"})</code>. Return <code>{`{ allow: true }`}</code> when <code>spentUSD &lt; capUSD * 0.95</code>. Return <code>{`{ allow: false, reason: "soft-cap" }`}</code> when <code>spentUSD</code> is in <code>[capUSD * 0.95, capUSD)</code>. Return <code>{`{ allow: false, reason: "hard-cap" }`}</code> when <code>spentUSD &gt;= capUSD</code>. The soft cap exists to give you a chance to alert before a hard stop.</>}
+  starter={`function enforceBudget({ spentUSD, capUSD }) {
+  // your code here
+}
+
+return enforceBudget;`}
+  test={testBudgetEnforcer}
+  hint={<>Three branches. Soft cap is "warn but block"; hard cap is "block, the budget is gone". The soft cap window is your alarm signal in production.</>}
+/>
+
+</Section>
+
+<Section id="forecast" num={9} title="Forecasting cost at scale">
+
+Before you launch, model the cost. Inputs you actually need:
+
+- **Tokens per call.** Average input + average output, plus an estimate of cache hit rate.
+- **Calls per session.** How many model turns does one user interaction trigger?
+- **Sessions per user.** How often does a user engage in a billing period?
+- **Users per month.** Active user count or projected user count.
+
+Multiply through; add a safety factor (usually 1.5x to 2x to account for retries, edge cases, and growth in usage per user). The result is your monthly token spend forecast.
+
+Then add the controls:
+
+- **Per-user <GLink slug="spend-cap">spend caps</GLink>.** Stop a single bad-actor user (or a runaway loop on a real user) from blowing the budget alone.
+- **Per-feature caps.** "This feature can spend up to $X per month." Forces prioritization when caps are hit.
+- **Alarm at 80%.** A monthly budget is a slow leak; alarm before the cap fires so you have time to react.
+- **Highest-cost-user identification.** Top 10 users by cost, refreshed daily. Often surfaces bugs or unintended use.
+
+The framing: cost is an SLO like latency or quality. Budget it explicitly; monitor it; treat overruns as incidents, not surprises.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter's cost is provider cost, not LLM cost</h3>
+
+    <p>Each Potter MCP tool is one HTTP call to a data provider: Proxycurl for company and person research, Apify for search and scraping, Firecrawl for site crawling, Stagehand for browser sessions. The cost is whatever the provider charges per call. No internal LLM, except in <code>potter_browser_act</code> where one Claude call per browser action is the deliberate exception (Module 13).</p>
+
+    <p>This split matches the M17 lesson: tool layers should be cheap and predictable. The agent loop wrapping Potter pays the larger LLM bill; the tool layer's cost is provider data fees. Mixing the two would make Potter expensive to call at high volume and would make routing decisions the harness's job, which they should be.</p>
+
+    <p>The corollary: when Potter is consumed by a background agent (the <code>batch-brief</code> runtime from Module 15), the per-brief LLM cost is bounded by the agent loop's prompts, not by Potter's tool count. Caching the system prompt and tool definitions is what keeps the loop affordable across thousands of leads.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-per-token-pricing" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">per-token pricing</p><p className="text-sm text-ink-700">Provider charges per million tokens, separated into input and output.</p></div>
+  <div id="glossary-cached-input" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">cached input</p><p className="text-sm text-ink-700">Repeated prompt prefixes that are billed at a fraction of standard input rate.</p></div>
+  <div id="glossary-cache-ttl" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">cache TTL</p><p className="text-sm text-ink-700">How long a cached prefix remains warm. Anthropic's ephemeral cache is roughly 5 minutes.</p></div>
+  <div id="glossary-model-routing" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">model routing</p><p className="text-sm text-ink-700">Picking a different model per turn or per use case based on cost or capability needs.</p></div>
+  <div id="glossary-batch-api-cost" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">batch API</p><p className="text-sm text-ink-700">Async tier with 50% cost discount and 24-hour SLA.</p></div>
+  <div id="glossary-max-tokens" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">max_tokens</p><p className="text-sm text-ink-700">API parameter capping output length. Default values are usually too high for cost.</p></div>
+  <div id="glossary-context-bloat" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">context bloat</p><p className="text-sm text-ink-700">Unbounded growth of conversation context that inflates per-call cost.</p></div>
+  <div id="glossary-wrapper-margin" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">wrapper margin</p><p className="text-sm text-ink-700">The thin profit margin LLM-wrapper startups operate on.</p></div>
+  <div id="glossary-token-forecast" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">token forecast</p><p className="text-sm text-ink-700">Predicted monthly token consumption from product metrics.</p></div>
+  <div id="glossary-spend-cap" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">spend cap</p><p className="text-sm text-ink-700">Per-user or per-feature limit that prevents runaway cost.</p></div>
+  <div id="glossary-cache-marker" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">cache marker</p><p className="text-sm text-ink-700">The cache_control field added to a content block to mark it cacheable.</p></div>
+  <div id="glossary-model-tiers" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Haiku, Sonnet, Opus</p><p className="text-sm text-ink-700">Anthropic's three tiers, ordered cheap to capable, used in routing decisions.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m17-q1" question="1. Highest-leverage cost optimization for an agent loop?">
+Prompt caching. The system prompt and tool definitions do not change between iterations; cache them. At a 70% hit rate, total input cost drops to roughly 33% of uncached. No other single lever has comparable impact for production agents.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q2" question="2. When does Haiku beat Sonnet for production?">
+Classifier turns, simple extraction, deterministic routing, formatting steps. Anything where the gap in capability is small and the difference in cost is large. Most agent flows have at least one or two turns where Haiku is the right answer; routing them away from Sonnet saves real money.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q3" question="3. Batch API trade-off in one sentence?">
+50% off the price, 24-hour SLA. Right for eval, enrichment, content generation. Wrong for anything user-facing or anything requiring multi-step real-time agent loops.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q4" question="4. Why do LLM-wrapper startups die on margins?">
+They charge $20 a month for a feature that costs $15 a month in tokens to deliver. Without aggressive caching, routing, batching, and output discipline, the gross margin does not survive contact with growth. Either the optimizations ship or the business folds; the middle ground is "raise prices and lose customers".
+</CheckQuestion>
+
+<CheckQuestion id="m17-q5" question="5. A user query causes a 50K-token tool result. What now?">
+That result eats your context budget AND costs 50K input tokens on every subsequent loop iteration. Truncate at the tool boundary, summarize before passing on, or cap the tool's output by design. Letting raw 50K results flow into the messages array is one of the cheapest ways to blow a budget by accident.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q6" question="6. Why cap max_tokens explicitly?">
+Default values across SDKs are often too high for production tasks. A chatty model that emits 1,500 tokens when 200 would do is paying 7.5x for nothing. Cap at the size you actually need; raise only when a specific call demands more.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q7" question="7. Forecast your monthly cost: minimum inputs you need?">
+Tokens per call, calls per session, sessions per user, users per month. Plus cache hit rate. Multiply through; add a safety factor. The result is your forecast; treat it like an SLO and monitor against it.
+</CheckQuestion>
+
+<CheckQuestion id="m17-q8" question="8. Why does Potter not incur per-call LLM cost?">
+Pure data fetching: tool inputs go to provider APIs (Proxycurl, Apify, Firecrawl), outputs return as structured data, no LLM call inside Potter. The exception is potter_browser_act, which spends one Claude call per browser action. The agent loop wrapping Potter pays the LLM bill; the tool layer pays provider fees.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the cost playbook: unit economics, caching, routing, batching, output discipline, wrapper margin reality check, forecasting and budget enforcement. The next module is the production constraint that decides whether the agent is safe to expose: security and adversarial inputs.
+
+<CompleteBanner moduleId="m17" nextSlug="security-adversarial" nextTitle="Module 18 · Security and adversarial" />
+
+</Section>
+
+<ModuleNav prevSlug="evaluation" prevTitle="Module 16 · Evaluation and testing" nextSlug="security-adversarial" nextTitle="Module 18 · Security and adversarial" />

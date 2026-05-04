@@ -18,6 +18,8 @@ export default defineConfig({
   },
   build: {
     outDir: 'dist',
-    target: 'es2022'
+    target: 'es2022',
+    // Mermaid + Wardley vendor chunks load lazily per module page; their size is acceptable.
+    chunkSizeWarningLimit: 700
   }
 });

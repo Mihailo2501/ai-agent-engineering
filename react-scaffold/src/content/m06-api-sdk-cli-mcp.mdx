@@ -1,0 +1,387 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  LayerStackDemo,
+  McpWalkthroughDemo,
+  testMcpToolDef,
+  testPickLayer,
+  testShapeTheApi
+} from './m06-api-sdk-cli-mcp';
+
+<ModuleHero
+  kicker="Module 06 · API · SDK · CLI · MCP"
+  title="The four layers, and which one to pick"
+  lead="Four interface shapes, in increasing layers of packaging: HTTP API, typed SDK, command-line harness, MCP protocol. They nest. Pick deliberately and you save weeks. Pick by accident and you fight the abstraction for the rest of the project."
+  trackId="interfaces"
+  moduleId="m06"
+/>
+
+<Toc items={[
+  { href: '#stack', label: 'The four layers' },
+  { href: '#http', label: 'Layer 0: HTTP API' },
+  { href: '#sdk', label: 'Layer 1: SDK' },
+  { href: '#cli', label: 'Layer 2: CLI / harness' },
+  { href: '#mcp', label: 'Layer 3: MCP' },
+  { href: '#nesting', label: 'How they nest' },
+  { href: '#picking', label: 'When each layer wins' },
+  { href: '#lock-in', label: 'The lock-in question' },
+  { href: '#potter-three', label: 'Potter v1 vs v2' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="stack" num={1} title="The four layers, in one diagram">
+
+At the bottom is one HTTP endpoint. Above it sits the Anthropic SDK. Above that sits a CLI like Claude Code or your own. Beside the CLI sits MCP, which exposes tools to any harness that speaks it. Each layer adds capability and removes flexibility, in roughly that order.
+
+<LayerStackDemo />
+
+The picture matters because most production "agent" code lives at exactly one of these layers, and the choice determines what you can change later without rewriting. The next four sections work bottom-up.
+
+</Section>
+
+<Section id="http" num={2} title="Layer 0: the HTTP API">
+
+The bottom of the stack is one endpoint:
+
+<CodeBlock lang="http">{`POST https://api.anthropic.com/v1/messages
+Content-Type: application/json
+x-api-key: sk-ant-...
+anthropic-version: 2023-06-01
+
+{
+  "model": "claude-opus-4-7",
+  "max_tokens": 1024,
+  "messages": [{ "role": "user", "content": "Hello" }]
+}`}</CodeBlock>
+
+This is what every layer above eventually calls. Stateless, language-agnostic, no dependencies. Curl works. fetch in any language works. There is no SDK to install, no version to pin, no helper to learn.
+
+When raw HTTP is right:
+
+- **Batch processing.** Nightly jobs, ETL pipelines, anything where you control the retry loop and rate limiting yourself.
+- **Cross-language scripting.** A bash script, a Go service, a Rust microservice, a Cloudflare Worker. The HTTP API is the lowest common denominator.
+- **Debugging an SDK problem.** When you suspect the SDK built the wrong request, replaying the raw HTTP call against the API isolates the bug.
+- **Zero-dependency production code.** Some teams refuse to add dependencies they cannot fully audit. Raw HTTP cuts the dependency to "you and the API."
+
+When raw HTTP is wrong: every long-lived development workflow. You will reinvent retry logic, streaming SSE parsing, type safety, and tool block helpers. That code is the SDK; you are just writing a worse version.
+
+</Section>
+
+<Section id="sdk" num={3} title="Layer 1: the SDK">
+
+The Anthropic SDK (TypeScript and Python officially, plus community ports) wraps the HTTP API in a typed library. The shape:
+
+<CodeBlock lang="ts">{`import Anthropic from '@anthropic-ai/sdk';
+
+const client = new Anthropic();   // reads ANTHROPIC_API_KEY from env
+
+const response = await client.messages.create({
+  model: 'claude-opus-4-7',
+  max_tokens: 1024,
+  messages: [{ role: 'user', content: 'Hello' }]
+});`}</CodeBlock>
+
+What the SDK gives you that you would otherwise reinvent:
+
+- **Retry logic.** Configurable backoff on 429 and 5xx, request timeouts, idempotency.
+- **Streaming helpers.** SSE event parsing, content-block accumulation, helpers like `client.messages.stream(...)` that emit typed events.
+- **Type safety.** Every request and response is fully typed. Tool definitions, content blocks, stop_reason values, usage fields.
+- **Error hierarchy.** `RateLimitError`, `APIConnectionError`, `BadRequestError`. Catchable by category instead of by string-matching error messages.
+- **Tool block helpers.** Helpers that wrap content arrays so you can iterate over typed `tool_use` blocks without writing your own parser.
+
+The SDK is the right call almost any time you are running an agent loop in your own process: a backend service, a CLI you wrote, a Cloudflare Worker, a Lambda. You install it, instantiate a client, and you are done.
+
+When you outgrow the SDK: rare. The SDK exposes the full HTTP surface. If a brand-new feature ships before the SDK adds it, you can drop to raw HTTP for that one call without abandoning the SDK elsewhere. The "I outgrew the SDK" claim is usually "I did not read the SDK changelog."
+
+</Section>
+
+<Section id="cli" num={4} title="Layer 2: the CLI / harness">
+
+A CLI is the SDK plus a UI plus a permission model plus file system access plus subagents plus settings.json plus everything else a real day of agent work needs. **Claude Code, Codex CLI, Cursor agent mode, your own 50-line custom harness.** Every one of them is the SDK with extra wrapping.
+
+What the harness layer adds on top of the SDK:
+
+- **An interactive UI.** Stream tokens, show tool calls, prompt for permission, display thinking blocks if the model emits them.
+- **File system integration.** Read, edit, write files in the working directory. Hooks fire on each operation.
+- **Permission model.** Per-tool prompts, allowlist memory, dangerously-skip-permissions when you really mean it.
+- **Subagents.** Spawn scoped agents with their own context and tool sets, collect results, merge.
+- **Settings layering.** `settings.json` files that compose global, user, project, project-local in a predictable override order.
+- **Lifecycle hooks.** UserPromptSubmit, PreToolUse, PostToolUse, Stop, SessionStart, PreCompact. Shell commands you wire into specific events.
+- **MCP attachment.** A standard way to pull external tools into the session.
+
+Module 07 is the side-by-side of Claude Code, Codex, Cursor, n8n, and rolling your own. Module 08 is the deep version of the Claude Code surface specifically. This module's job is naming the layer.
+
+When the CLI layer wins: developer workflows where you live in a terminal and want the agent to *be* part of your tooling, not a thing you call from your tooling. When it loses: production services that must run headless, embedded into another product, or in environments where a TTY does not exist.
+
+</Section>
+
+<Section id="mcp" num={5} title="Layer 3: MCP, the tool protocol">
+
+<GLink slug="mcp">MCP (Model Context Protocol)</GLink> is not a layer above the CLI; it sits *beside* it. MCP is the wire protocol a harness uses to discover and call tools from a separate process. The point is reuse: write your tool once as an MCP server, every MCP-speaking harness can use it.
+
+The shape of an MCP exchange:
+
+1. Harness spawns the MCP server (subprocess via stdio, or connects via streamable HTTP).
+2. Harness sends `initialize`; server returns its capabilities and protocol version.
+3. Harness calls `tools/list`; server returns its catalog with name, description, inputSchema.
+4. When the model emits a `tool_use`, the harness routes it to `tools/call` with name and arguments.
+5. Server executes, returns the result. Harness wraps it as a `tool_result` for the next API call.
+
+The transports you care about in 2026:
+
+- **stdio.** The local-process default. The server is a subprocess; messages flow over stdin and stdout. Used by anything that runs on the user's machine: Potter, filesystem MCP servers, shell servers, git tools.
+- **streamable HTTP.** The hosted-server default. Messages over HTTP with chunked responses. Used by SaaS MCP servers (vendor-hosted CRMs, hosted databases, hosted search).
+- **SSE.** The legacy hosted transport. Server-Sent Events. Many older hosted servers still use this; new servers should pick streamable HTTP.
+
+A minimal MCP tool definition (note: **camelCase** `inputSchema` here, vs **snake_case** `input_schema` in the Anthropic tools field):
+
+<CodeBlock lang="ts">{`// MCP tool registration
+server.tool({
+  name: 'lookup_company',
+  description: 'Look up a company by domain. Returns name, size, industry.',
+  inputSchema: {
+    type: 'object',
+    properties: {
+      domain: { type: 'string', description: 'Company website domain, e.g. acme.com' }
+    },
+    required: ['domain']
+  }
+}, async ({ domain }) => {
+  return await fetchCompanyData(domain);
+});`}</CodeBlock>
+
+The MCP server is plain code that handles inputs and returns results. The protocol decides how the harness finds and calls it; the language and framework you write the server in is up to you (TypeScript SDK, Python SDK, Rust SDK, hand-rolled JSON-RPC).
+
+### Trace one MCP request end to end
+
+<McpWalkthroughDemo />
+
+### Sandbox · Build a minimal MCP tool definition
+
+The tool definition shape is the same JSON Schema you saw in Module 01, with one subtle field-name change. Get it right.
+
+<Sandbox
+  id="m06-mcp-tool-def"
+  mode="js"
+  prompt={<>Build the MCP tool definition object for <code>lookup_company</code>. Required fields: <code>name</code> (exactly <code>"lookup_company"</code>), <code>description</code> (string of at least 30 characters explaining when to call it), and <code>inputSchema</code> in <strong>camelCase</strong>. <code>inputSchema</code> shape: <code>{'{ type: "object", properties: { domain: { type: "string", description: "..." } }, required: ["domain"] }'}</code>. The verifier explicitly fails if you used <code>input_schema</code> (Anthropic SDK style) instead of <code>inputSchema</code> (MCP SDK style). The <code>domain.description</code> needs to be at least 5 characters because the model reads it to fill the argument.</>}
+  starter={`const tool = {
+  // your code here
+};
+
+return tool;`}
+  test={testMcpToolDef}
+  hint={<>The shape is identical to the Anthropic SDK tool def except the schema field is <code>inputSchema</code> (camelCase). One letter, but it is the diff between an MCP server and an SDK call.</>}
+/>
+
+</Section>
+
+<Section id="nesting" num={6} title="How they nest, with one real example">
+
+A real Potter user query, traced through the stack:
+
+<Mermaid chart={`flowchart TD
+  USER["User: 'Brief me on acme.com'"]
+  USER --> CC["Claude Code (Layer 2: CLI)"]
+  CC -->|uses Anthropic SDK| SDK["Anthropic SDK (Layer 1)"]
+  SDK -->|HTTP POST| API["/v1/messages (Layer 0)"]
+  API -->|tool_use| SDK
+  SDK -->|typed response| CC
+  CC -->|MCP tools/call| MCP["Potter MCP server (Layer 3)"]
+  MCP -->|HTTP| PROX["Proxycurl"]
+  PROX -->|company JSON| MCP
+  MCP -->|tool_result| CC`} />
+
+<p className="text-sm text-ink-500">Layers 0 through 3 in one trace. Each layer hands off to the next; none of them overlaps another's job.</p>
+
+The user types into a CLI (Layer 2). The CLI uses an SDK (Layer 1) under the hood to make HTTP calls (Layer 0). The CLI also speaks MCP (Layer 3) to reach a separate tool process (Potter) that does data work outside the agent loop. Four layers, four jobs, no duplication.
+
+This is what "layered architecture" means in practice for agent systems. Every layer hides the one below it from the layers above. You can swap Claude Code for Cursor without rewriting Potter. You can swap Potter's data provider (Proxycurl to Apify) without touching Claude Code or the SDK. You can drop the SDK and use raw HTTP for one specific call without losing access to the other layers.
+
+</Section>
+
+<Section id="picking" num={7} title="When each layer wins">
+
+Pick the layer that matches your need to control versus your need to ship:
+
+- **Raw API (Layer 0):** batch processing, cross-language scripts, zero-dep production code, debugging the SDK.
+- **SDK (Layer 1):** in-process agent loops, backend services, CLIs you wrote, anything where retry/streaming/types matter.
+- **CLI / harness (Layer 2):** developer workflows, file-aware work, permission gating, multi-tool sessions, day-to-day iteration.
+- **MCP (Layer 3):** tools you want callable from many harnesses, team-shared tool catalogs, third-party integration.
+
+The defaults that hold most of the time:
+
+- New script with one model call: SDK.
+- New batch job, no streaming, owns its own retry: raw API.
+- Day-to-day code editing with the model in the loop: Claude Code (Layer 2).
+- Tool you want available in Claude Code today and Cursor next month: MCP.
+
+### Sandbox · Pick the right layer
+
+Implement `pickLayer(useCase)` returning one of `"api"`, `"sdk"`, `"cli"`, `"mcp"` for canonical use cases.
+
+<Sandbox
+  id="m06-pick-layer"
+  mode="js"
+  prompt={<>The task object has a <code>kind</code> field. Mappings: <code>"nightly-batch-job"</code> returns <code>"api"</code> (no UI, you control retry); <code>"in-process-agent-loop"</code> returns <code>"sdk"</code>; <code>"developer-iterating-locally"</code> returns <code>"cli"</code>; <code>"expose-tools-to-many-harnesses"</code> returns <code>"mcp"</code>; <code>"team-shared-research-toolkit"</code> returns <code>"mcp"</code>; <code>"quick-personal-script"</code> returns <code>"sdk"</code>. Anything else falls back to <code>"sdk"</code>: when the use case is unspecified, the SDK is the safe default for new code.</>}
+  starter={`function pickLayer(task) {
+  // your code here
+}
+
+return pickLayer;`}
+  test={testPickLayer}
+  hint={<>Object map plus a fallback works fine. <code>{'const map = { "nightly-batch-job": "api", ... }; return map[task.kind] ?? "sdk";'}</code></>}
+/>
+
+</Section>
+
+<Section id="lock-in" num={8} title="The lock-in question">
+
+Each layer commits you to different things. A practical ranking of how hard it is to change your mind later:
+
+- **Raw HTTP:** lowest lock-in. Switch providers (Anthropic to OpenAI to a self-hosted vLLM endpoint) by changing the URL and a few field names. The cost is the work you already paid: every helper you wrote (retry, streaming, types) ports manually.
+- **SDK:** light lock-in. The Anthropic SDK is Anthropic-specific, but the request shape is similar enough across providers that porting is a few-day job, not a rewrite. Vercel AI SDK and similar provider-agnostic libraries are designed exactly for this.
+- **CLI / harness:** medium lock-in. Claude Code's hooks, skills, plugins, settings.json, /agents directory are all Claude Code conventions. Switching to Cursor or Codex means learning their equivalents (some translate, some do not). Reusable artifacts: prompts, tool definitions, MCP attachments.
+- **MCP:** lowest lock-in *across harnesses*. A Potter MCP server works in Claude Code, Cursor, Codex, your own custom harness. Changing harnesses does not require rewriting tools. The lock-in MCP does have is to the protocol itself: if the protocol evolves, your server has to follow. But MCP is open, governed by an open RFC process, and broadly adopted; this is acceptable risk.
+
+The takeaway is not "always pick the lowest-lock-in option." It is "know what you are committing to so the cost does not surprise you." Most teams pick CLI lock-in deliberately because the developer-velocity gains outweigh the future migration cost, and they hedge by writing portable tools as MCP servers.
+
+### Sandbox · Shape the API call from Layer 0
+
+Time to wire a call yourself. Define a `get_weather` tool, force the model to call it, pull the tool_use block out of the response.
+
+<Sandbox
+  id="m06-shape-the-api"
+  mode="anthropic"
+  prompt={<>Build a request that exercises the full tool-use round trip from Layer 0. Define a single tool with name <code>"get_weather"</code>, a clear description, and an <code>input_schema</code> requiring a <code>city</code> string. (Note: at this layer the field is snake_case <code>input_schema</code>; MCP would use camelCase.) Send a user message asking the model to look up the weather in Paris. Set <code>tool_choice</code> to <code>{'{ type: "tool", name: "get_weather" }'}</code> so the model is required to call the tool. Find the <code>tool_use</code> block in <code>response.content</code> and return that block (not just the input, the whole content block). The verifier checks <code>type === "tool_use"</code>, <code>name === "get_weather"</code>, and that <code>input.city</code> contains "Paris" (case-insensitive).</>}
+  starter={`const tools = [{
+  name: 'get_weather',
+  description: 'Look up current weather for a city. Returns temperature in Celsius and conditions.',
+  input_schema: {
+    type: 'object',
+    properties: { city: { type: 'string', description: 'City name, e.g. Paris' } },
+    required: ['city']
+  }
+}];
+
+const response = await claude({
+  messages: [
+    { role: 'user', content: 'What is the weather in Paris?' }
+  ],
+  tools,
+  tool_choice: { type: 'tool', name: 'get_weather' },
+  max_tokens: 256
+});
+
+// find the tool_use content block
+const toolUseBlock = /* your code */;
+
+return toolUseBlock;`}
+  test={testShapeTheApi}
+  hint={<>Walk <code>response.content</code> for the block where <code>type === "tool_use"</code>: <code>{'response.content.find(b => b.type === "tool_use")'}</code>. Forcing tool_choice removes the variability of the model deciding text-vs-tool-use.</>}
+/>
+
+</Section>
+
+<Section id="potter-three" num={9} title="Building Potter v1 vs v2: an architecture story">
+
+Potter ships in three runtimes from one npm package: an MCP server (the v1 shape), a batch-brief CLI (run a research query directly without a harness), and a standalone interactive CLI (a harness that embeds the agent loop and consumes its own tools).
+
+Why three? Because each one wins in a different layer of the stack:
+
+- **MCP server.** Layer 3. The portable form. Drops into Claude Code, Cursor, any MCP-speaking harness. The default consumption path.
+- **Batch-brief CLI.** Layer 1, with a hard-coded loop. Run a research query from CI or a cron job. No interactive UI needed, no harness overhead. The user provides a domain, gets a brief.
+- **Interactive CLI.** Layer 2, custom harness. Wraps the agent loop with a minimal terminal UI. Used when you want Potter without bringing Claude Code along, in environments where Claude Code is overkill.
+
+All three runtimes share the same core tool functions. The runtime is just the delivery mechanism. This is the practical answer to "which layer should I ship at?": often you ship at multiple layers, with one piece of core logic and three thin runtime wrappers. The work is in the core; the runtimes are days, not weeks.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter as the layer-3 case study</h3>
+
+    <p>Potter is the canonical "MCP is the right shape when the consumer is a harness" example. The same Potter MCP server is consumed by Claude Code (today), by Cursor agents speaking MCP (also today), and by Mihailo's standalone Potter CLI (the v2 path) which embeds the agent loop directly. Three different harness layers, one tool layer, zero duplicated logic.</p>
+
+    <p>The discipline that makes this possible is the spec discipline introduced in [Module 01](/m/primitives#tool-use): Potter's tool descriptions are written as prompts; schemas are typed; tools are pure data fetchers (with the deliberate exception of <code>potter_browser_act</code>, which Module 13 will unpack). No tool calls a model. No tool stores state. Each tool does one thing and returns structured output. That cleanliness is what lets Potter sit at Layer 3 without anyone caring which Layer 2 is on top.</p>
+
+    <p>The lesson generalizes. When you build tools that should be reusable, build them as MCP servers and write the surrounding code in a harness layer the user picks. The boundary is rigid; the harness is replaceable.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-http-api" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">HTTP API</p><p className="text-sm text-ink-700">The raw endpoint a provider exposes. Lowest layer; you pay for everything above it.</p></div>
+  <div id="glossary-sdk" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">SDK</p><p className="text-sm text-ink-700">Typed library wrapping the HTTP API in your language of choice. Anthropic SDK in TypeScript and Python.</p></div>
+  <div id="glossary-cli" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">CLI</p><p className="text-sm text-ink-700">Command-line tool layered on top of the SDK that adds UI, file access, permissions, hooks, subagents.</p></div>
+  <div id="glossary-mcp" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP</p><p className="text-sm text-ink-700">Model Context Protocol. Standard for exposing tools to LLM harnesses.</p></div>
+  <div id="glossary-stdio-transport" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">stdio transport</p><p className="text-sm text-ink-700">MCP over stdin and stdout pipes. Used by local server processes.</p></div>
+  <div id="glossary-sse-transport" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">SSE transport</p><p className="text-sm text-ink-700">MCP over Server-Sent Events. Used by older hosted MCP servers.</p></div>
+  <div id="glossary-streamable-http" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">streamable HTTP</p><p className="text-sm text-ink-700">A newer MCP transport using HTTP with chunked responses. The default for new hosted servers.</p></div>
+  <div id="glossary-capability-negotiation" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">capability negotiation</p><p className="text-sm text-ink-700">The MCP handshake where client and server agree on which features are supported.</p></div>
+  <div id="glossary-mcp-resources" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP resources</p><p className="text-sm text-ink-700">Read-only data sources exposed by an MCP server, alongside tools.</p></div>
+  <div id="glossary-mcp-prompts" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP prompts</p><p className="text-sm text-ink-700">Reusable prompt templates exposed by an MCP server, alongside tools.</p></div>
+  <div id="glossary-harness" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">harness</p><p className="text-sm text-ink-700">The CLI or app that runs the agent loop. Claude Code, Codex, Cursor, your custom script.</p></div>
+  <div id="glossary-layer-lock-in" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">layer lock-in</p><p className="text-sm text-ink-700">The cost of switching between API, SDK, CLI, MCP layers later in the project.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m06-q1" question="1. Why nest the layers at all?">
+Each layer adds developer ergonomics and removes implementation flexibility. Raw HTTP gives you full control and zero help; the SDK gives you retry, streaming, and types at the cost of a dependency; the CLI adds UI and file access at the cost of harness conventions; MCP adds cross-harness portability at the cost of protocol overhead. The right layer matches your need to control against your need to ship fast.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q2" question="2. When is raw HTTP actually the right call?">
+Batch processing where you control retry and rate limiting yourself. Cross-language scripts where the SDK is not available. Cloudflare Workers and other edge runtimes with strict dependency limits. Debugging an SDK problem by replaying the raw call to isolate where the wrong shape originates. For long-running development workflows, you almost always want the SDK above raw HTTP.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q3" question="3. What does the SDK do for you that you would otherwise reinvent?">
+Retry logic with backoff on 429 and 5xx, streaming SSE event parsing, type-safe request and response shapes, error class hierarchy you can catch by category, content-block helpers for tool_use parsing. Every one of these is code you would write again to ship a real agent loop.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q4" question="4. When does MCP win over wrapping a tool in your CLI directly?">
+When you want the tool reachable from any harness (Claude Code today, Cursor tomorrow, your own custom CLI later, a teammate's Codex setup). MCP is the portability layer. If you control all consumers and never plan to share the tool, an in-CLI implementation is fine; if reuse is a possibility, MCP is cheaper than refactoring later.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q5" question="5. Three MCP transports, which one for what?">
+stdio for local subprocesses (Potter, filesystem servers, anything running on the user's machine). streamable HTTP for new hosted servers (default for SaaS MCP integrations in 2026). SSE for older hosted servers (legacy; new servers should pick streamable HTTP). Pick stdio for local, streamable HTTP for hosted, fall back to SSE only if the server you are integrating already speaks it.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q6" question="6. MCP resources and prompts, beyond tools?">
+Resources expose read-only data the server has (files, query results, fetched documents) that the harness can include in context. Prompts expose reusable templated prompt strings the harness can offer to the user. Most servers ship tools only and skip both. Resources matter when the server has a corpus the harness should browse; prompts matter when you want the server to ship reusable workflow templates.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q7" question="7. Why does Potter ship as MCP and CLI?">
+MCP for portable consumption inside Claude Code and other harnesses (the default path). CLI for direct interactive use, batch jobs, and CI environments where running the MCP server alongside a harness is overhead. The two runtimes share the same core tool functions; the runtime is just delivery. Shipping both takes days because the work is in the core.
+</CheckQuestion>
+
+<CheckQuestion id="m06-q8" question="8. An issue surfaces in production. What layer should you debug at?">
+Start at the SDK to inspect the request shape it produced. If the shape is wrong, the SDK is at fault (rare but possible). If the shape is right, drop to raw HTTP and replay the request to isolate API behavior from SDK helpers. If the SDK is correct and the API is correct, the bug is in your code: instrumented logs at Layer 1 are usually where you find it.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You now have a vocabulary for picking the right layer. The next module is the deep version of Layer 2: a side-by-side of Claude Code, Codex, Cursor, n8n, and rolling your own.
+
+<CompleteBanner moduleId="m06" nextSlug="harnesses" nextTitle="Module 07 · Harnesses" />
+
+</Section>
+
+<ModuleNav prevSlug="multimodal" prevTitle="Module 05 · Multimodal and reasoning" nextSlug="harnesses" nextTitle="Module 07 · Harnesses" />

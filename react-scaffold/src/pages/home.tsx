@@ -81,7 +81,10 @@ function ModuleCard({ module }: { module: Module }): React.JSX.Element {
     <>
       <ModuleArt module={module} />
       <div className="mt-4">
-        <p className="text-xs text-ink-500">Module {module.num}</p>
+        <div className="flex items-center justify-between gap-2">
+          <p className="text-xs text-ink-500">Module {module.num}</p>
+          <p className="text-xs text-ink-500">~{module.minutes} min</p>
+        </div>
         <h3 className="mt-1 font-heading text-base text-ink-900">{module.title}</h3>
         <p className="mt-2 line-clamp-2 text-sm text-ink-700">{module.lead}</p>
         {!module.available ? (
@@ -112,9 +115,32 @@ export function HomePage(): React.JSX.Element {
   }, []);
 
   const badgesEarned = BADGES.filter(isBadgeUnlocked).length;
+  const courseComplete = overall.modulesCompleted === overall.totalModules && overall.totalModules > 0;
 
   return (
     <div className="space-y-12">
+      {courseComplete ? (
+        <section className="rounded-2xl bg-clay-mint p-8 shadow-medium">
+          <div className="flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
+            <div>
+              <p className="text-xs uppercase tracking-wide text-ink-700">Course complete</p>
+              <h2 className="mt-1 font-heading text-2xl text-ink-900">
+                All 25 modules done. Nice work.
+              </h2>
+              <p className="mt-2 text-sm text-ink-700">
+                You shipped through every track. Revisit any module any time. Your progress and badges stay in this browser.
+              </p>
+            </div>
+            <Link
+              to="/m/potter-case-study"
+              className="inline-flex shrink-0 rounded-full bg-accent-coral px-5 py-2.5 text-sm font-semibold text-white transition-transform hover:-translate-y-0.5"
+            >
+              Revisit Module 25
+            </Link>
+          </div>
+        </section>
+      ) : null}
+
       <section className="grid grid-cols-1 gap-8 rounded-2xl bg-clay-cream p-12 shadow-medium md:grid-cols-2">
         <div>
           <h1 className="mb-6 font-heading text-5xl leading-[1.05] text-ink-900 md:text-6xl">

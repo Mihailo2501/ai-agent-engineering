@@ -210,7 +210,7 @@ This is the first pattern that crosses the line from workflow into agent territo
 
 ### What goes wrong
 
-- **Token cost compounds.** Three workers plus an orchestrator plus a synthesizer is five LLM calls for one user turn. Latency adds up. [Prompt caching](/m/primitives#prompt-caching) on the shared system prompt is doing real work here.
+- **Token cost compounds.** Three workers plus an orchestrator plus a synthesizer is five LLM calls for one user turn. Latency adds up. [Prompt caching](/m/primitives#glossary-prompt-caching) on the shared system prompt is doing real work here.
 - **Worker handoff drift.** If the orchestrator's subtask description is vague, the worker fills in gaps creatively. Treat each subtask description as a tool description: it is the worker's only briefing.
 - **Synthesis is its own job.** Three good worker outputs do not combine themselves. The synthesis prompt is often where the orchestrator-worker pattern actually lives or dies.
 
@@ -415,4 +415,4 @@ Once you have read everything, played with the demos, passed the sandboxes, and 
 
 </Section>
 
-<ModuleNav prevSlug="primitives" prevTitle="Module 01 · Primitives" nextSlug="prompt-engineering" nextTitle="Module 04 · Prompt engineering for agents" />
+<ModuleNav prevSlug="inference" prevTitle="Module 02 · Inference" nextSlug="prompt-engineering" nextTitle="Module 04 · Prompt engineering for agents" />

@@ -1,0 +1,385 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  AsyncPatternPickerDemo,
+  AsyncLifecycleStepper,
+  testPickAsyncShape,
+  testRetryPolicy,
+  testIdempotencyKey
+} from './m15-async-agents';
+
+<ModuleHero
+  kicker="Module 15 · Background and async agents"
+  title="Agents that wake up on a schedule"
+  lead="Most agent demos are interactive: you type, it answers. Real GTM and ops work needs the opposite shape: agents that wake up on a schedule, run for hours, retry on failures, and report back. Cron-driven, queue-fed, durable."
+  trackId="building"
+  moduleId="m15"
+/>
+
+<Toc items={[
+  { href: '#fg-bg', label: 'Foreground vs background agents' },
+  { href: '#cron', label: 'Cron-driven agents' },
+  { href: '#queue', label: 'Queue-fed agents' },
+  { href: '#durable', label: 'Durable execution: Inngest, Trigger.dev, Temporal' },
+  { href: '#resumable', label: 'Resumable agent state' },
+  { href: '#long-running', label: 'Long-running agents (hours, days)' },
+  { href: '#retry', label: 'Failure and retry policies' },
+  { href: '#observability', label: 'Observability for background agents' },
+  { href: '#cost', label: 'Cost control on always-on agents' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="fg-bg" num={1} title="Foreground vs background agents">
+
+A <GLink slug="foreground-agent">foreground agent</GLink> has a user waiting. Latency budget is in seconds for chat ([Module 01](/m/primitives)) or hundreds of milliseconds for voice ([Module 14](/m/voice-realtime)). Errors surface to the user immediately; retries are limited; cost is bounded by per-session length.
+
+A <GLink slug="background-agent">background agent</GLink> has a deadline. The user is not watching the request. Latency budget is minutes to hours. Errors retry; long jobs persist state across crashes; the agent runs on a schedule or in response to an event.
+
+The same agent loop you wrote for foreground does not just transplant to background. New constraints:
+
+- **Idempotency.** A retry must not duplicate work. Sent emails, charged cards, enrolled leads are not safe to redo blindly.
+- **Persistent state.** Crashes happen. The job has to resume from the last completed step, not start over.
+- **Observability.** No user is watching; the only signal is structured events going to your logging stack.
+- **Escalation.** When retries exhaust, the failure must surface to a human via a channel a human actually checks.
+
+<AsyncPatternPickerDemo />
+
+</Section>
+
+<Section id="cron" num={2} title="Cron-driven agents">
+
+The simplest background pattern. A scheduler fires every N minutes, hours, or days; the agent wakes up, does work, goes back to sleep.
+
+When cron fits:
+
+- **Time-bound work.** Daily lead enrichment, hourly funding monitor, weekly report generation. The trigger is the clock.
+- **Idempotent operations.** Re-running a query against a snapshot is safe; sending an email twice is not.
+- **Bounded duration.** Each run finishes well within the next interval, so the next tick has a fresh slate.
+
+When cron is wrong:
+
+- **Event-bound work.** A new lead arrives; you should process it now, not at the next 6 AM tick. Use a queue.
+- **Long-running flows.** A run that takes 8 hours straddles the next tick; you need durable execution.
+- **High-throughput workloads.** Cron is a single-shot trigger; once it fires, the runtime decides concurrency. For high fan-out, queues are cleaner.
+
+A 30-line example using node-cron and Anthropic:
+
+<CodeBlock lang="ts">{`import cron from 'node-cron';
+import Anthropic from '@anthropic-ai/sdk';
+import { fetchLeadsToEnrich, saveBrief } from './leads';
+
+const client = new Anthropic();
+
+cron.schedule('0 6 * * *', async () => {
+  const runId = \`leads-\${new Date().toISOString().slice(0, 10)}\`;
+  console.log({ event: 'run.start', run_id: runId });
+
+  const leads = await fetchLeadsToEnrich({ limit: 100 });
+  for (const lead of leads) {
+    try {
+      const brief = await runAgentLoop(client, lead);
+      await saveBrief(lead.id, brief);
+      console.log({ event: 'lead.completed', run_id: runId, lead_id: lead.id });
+    } catch (err) {
+      console.error({ event: 'lead.failed', run_id: runId, lead_id: lead.id, error: String(err) });
+      // do not break the whole run on one failure
+    }
+  }
+
+  console.log({ event: 'run.complete', run_id: runId, count: leads.length });
+});`}</CodeBlock>
+
+The pattern: structured logs with a stable `run_id`, per-item error isolation (one bad lead does not kill the run), idempotent destination writes (`saveBrief` should overwrite by `lead.id` if the brief already exists today).
+
+</Section>
+
+<Section id="queue" num={3} title="Queue-fed agents">
+
+When the trigger is an event rather than the clock, queues fit. A producer enqueues an event; a consumer (the agent worker) pulls and processes.
+
+The shape:
+
+- **Producer.** A webhook handler, a CDC stream, a user action handler. Validates the input and pushes onto a queue with a unique id.
+- **Queue.** SQS, Pub/Sub, Cloud Tasks, Redis streams, or platform-specific (Inngest, Trigger.dev). Persists events; supports at-least-once or exactly-once semantics.
+- **Consumer.** Worker processes that pull, run the agent loop, and ack on success. Failures retry; persistent failures land in a <GLink slug="dead-letter">dead-letter queue</GLink>.
+
+Why decoupling matters:
+
+- **Producer rate vs consumer rate.** The webhook fires faster than the agent can process. The queue absorbs the burst.
+- **Backpressure.** When consumers are unhealthy, events accumulate; metrics show the depth; you scale or escalate.
+- **Fan-out.** One event triggers multiple workflows (enrich + score + route), each consuming the same source event independently.
+
+Idempotency at the consumer is non-negotiable. Most queues guarantee at-least-once delivery; without an <GLink slug="idempotency-key">idempotency key</GLink>, retries duplicate work.
+
+</Section>
+
+<Section id="durable" num={4} title="Durable execution: Inngest, Trigger.dev, Temporal">
+
+<GLink slug="durable-execution">Durable execution</GLink> is the runtime pattern where a workflow can survive crashes. Each <GLink slug="step">step</GLink> runs once and persists its result; on restart, completed steps are skipped, the workflow resumes from where it left off.
+
+The three platforms in the 2026 lineup:
+
+- **Inngest.** TypeScript-first, event-driven, serverless. Steps are functions decorated with the runtime's API. Strong on developer experience; fits cleanly into Next.js, Vercel, AWS Lambda environments. Pricing is event-based; scales well for typical agent workloads.
+- **Trigger.dev.** TypeScript-first, similar to Inngest, with a stronger emphasis on long-running tasks and explicit step boundaries. Good UI for replay and debugging.
+- **Temporal.** The classic. Polyglot SDKs (Go, Java, Python, TypeScript, Ruby, C#, PHP), workflow-as-code, deeply battle-tested at large scale. Heavier to operate; usually self-hosted or via Temporal Cloud. The strong guarantees: deterministic workflow logic and replayable, idempotency-keyed activities. Worth the weight when you need durable side effects to land at-most-once across complex multi-day workflows.
+
+Why durable beats plain async/await for long agent flows:
+
+- **Survives crashes.** A 30-step agent loop that crashes at step 17 resumes from step 17, not step 1. Without durable, you start over and pay for redundant work.
+- **Automatic retry per step.** Each step has its own retry policy; you do not write retry loops by hand.
+- **Replay for debugging.** Persisted run state lets you re-execute a failed run deterministically, modulo sampling variance.
+- **Step-level idempotency.** Workflow logic is deterministic and replayable; activities (the side-effect-bearing steps) are at-least-once with idempotency keys to make repeated runs safe. Done right, a side effect lands at most once even after restart. No double sends, no double charges.
+
+A sketch in Inngest-style pseudo-code:
+
+<CodeBlock lang="ts">{`export const enrichLead = inngest.createFunction(
+  { id: 'enrich-lead' },
+  { event: 'lead/created' },
+  async ({ event, step }) => {
+    const company = await step.run('research-company', () =>
+      potter.research_company({ domain: event.data.company_domain })
+    );
+
+    const person = await step.run('research-person', () =>
+      potter.research_person({ linkedin: event.data.linkedin_url })
+    );
+
+    const brief = await step.run('compose-brief', () =>
+      composeBrief({ company, person })
+    );
+
+    await step.run('save-brief', () =>
+      saveBrief(event.data.lead_id, brief)
+    );
+  }
+);`}</CodeBlock>
+
+Each `step.run` persists its result. If the function crashes after `research-company` but before `research-person`, restart skips `research-company` and resumes at `research-person`. You did not pay twice for the first call.
+
+</Section>
+
+<Section id="resumable" num={5} title="Resumable agent state">
+
+The harness's job is to persist what the agent knows so far so it can pick up. The minimum:
+
+- **The messages array.** Every turn so far, including model responses, tool calls, tool results.
+- **The run id.** Stable across the workflow; used to correlate logs and to fetch state on resume.
+- **The current step.** Where in the flow we were when we crashed (durable execution does this automatically).
+- **External side effects.** What has already been done (emails sent, leads enrolled), keyed by idempotency key, so a retry knows what to skip.
+
+Where to persist:
+
+- **Durable execution platforms.** Inngest, Trigger.dev, Temporal handle this for you. Each step's input and output is stored; the runtime knows what is done.
+- **Postgres.** Roll-your-own option. A `runs` table with `(run_id, step_name, completed_at, output_blob)` is enough for most agent flows. Cheap, simple, observable.
+- **Object storage.** For large state (long messages arrays, tool result payloads), reference S3 or R2 keys from the row rather than inlining the blobs.
+
+What to discard rather than persist:
+
+- **Streaming intermediate tokens.** Re-run if needed; do not persist every delta.
+- **Failed tool results that will retry.** Keep the input that caused the failure; retry will produce a new result.
+- **Any PII that is not load-bearing.** [Module 18](/m/security-adversarial) goes deeper; the rule of thumb is to redact aggressively before persisting.
+
+</Section>
+
+<Section id="long-running" num={6} title="Long-running agents (hours, days)">
+
+When a run exceeds a single API session's practical limits, break it into chunks. Patterns:
+
+- **Step-driven progress.** A 6-hour enrichment run is 1000 leads x 20 seconds per lead. Each lead is its own step; the runtime persists progress as it goes; a crash restarts from the next undone lead.
+- **External progress reporting.** The agent posts to Slack or a status dashboard at intervals ("Processed 350 of 1000 leads. ETA: 2 hours."). Humans see progress without polling.
+- **Pause for review checkpoints.** Long flows that touch sensitive resources (sending bulk emails, mutating production data) pause at defined checkpoints until a human signs off. Inngest and Temporal support this natively.
+- **Time-boxed runs with graceful continuation.** If the run is approaching the runtime's max execution time, persist state and re-enqueue the remainder. Some platforms handle this automatically; others want you to plan for it.
+
+The discipline that holds: every long run is a sequence of small idempotent steps, each persisted, each individually retryable. The agent's "thinking" (LLM calls) is one kind of step among many; tool calls, side effects, summary writes are all steps.
+
+</Section>
+
+<Section id="retry" num={7} title="Failure and retry policies">
+
+Three things to decide for every kind of step:
+
+- **Is the failure transient or terminal?** Network errors, 5xx responses, rate limits are transient: retry. Auth failures, validation errors, 404s on permanent resources are terminal: do not retry.
+- **How many times should we retry?** Usually 3 to 5 with <GLink slug="exponential-backoff">exponential backoff</GLink>. After that, escalate.
+- **What backoff curve?** Doubling on each attempt (100ms, 200ms, 400ms, 800ms, 1600ms) is standard. Cap at a reasonable max (5 to 30 seconds).
+- **How much <GLink slug="jitter">jitter</GLink>?** Add randomness so two retrying clients do not sync up. A jitter ratio of 0.5 means each delay is sampled uniformly from `[base*0.5, base*1.5]`.
+
+The escalation policy at the end:
+
+- **Dead-letter store.** Failed items go somewhere durable; they are not lost.
+- **Alarm on dead-letter depth.** When the count crosses a threshold, page someone.
+- **Triage tooling.** A human can replay items, manually complete, or accept the loss. Without tooling, dead letters become a graveyard.
+
+### Sandbox · Implement an exponential-backoff retry
+
+<Sandbox
+  id="m15-retry-policy"
+  mode="js"
+  prompt={<>Implement <code>nextRetryDelay({"{ attempt, baseMs, maxMs, jitterRatio }"})</code>. Exponential backoff: base delay is <code>baseMs * 2^attempt</code>, clamped at <code>maxMs</code>. Jitter: multiply the result by a uniform random sample in <code>[1 - jitterRatio, 1 + jitterRatio]</code>. Return the resulting delay in ms.</>}
+  starter={`function nextRetryDelay({ attempt, baseMs, maxMs, jitterRatio }) {
+  // your code here
+}
+
+return nextRetryDelay;`}
+  test={testRetryPolicy}
+  hint={<>Compute <code>min(baseMs * Math.pow(2, attempt), maxMs)</code>, then multiply by <code>1 + (Math.random() * 2 - 1) * jitterRatio</code>. The verifier samples 30 values to confirm jitter actually randomizes.</>}
+/>
+
+</Section>
+
+<Section id="observability" num={8} title="Observability for background agents">
+
+What to log on every run:
+
+- **Structured events.** Not free text. Each event a JSON object with stable field names. `{ event: 'run.start', run_id, workflow, started_at }`.
+- **A correlation id.** `run_id` for the whole workflow, plus optional `step_id` per step. Lets you reconstruct the timeline of a single run from a flat log stream.
+- **Tool call shape.** Tool name, arguments (with PII redacted), result status, latency, retry count.
+- **Model decisions.** Stop reason, tokens used, model picked, cost.
+- **Gate decisions.** Was a step allowed, denied, or queued for human approval? [Module 18](/m/security-adversarial).
+- **Final outcome.** Completed, retried-and-completed, dead-lettered. Plus an outcome reason.
+
+Where to send:
+
+- **Stdout in development.** A simple JSON-per-line log lets you grep for run_id during local debugging.
+- **OpenTelemetry in production.** GenAI semantic conventions are emerging; emit them.
+- **Hosted platforms.** Langfuse and Helicone handle agent-specific signals. Inngest and Trigger.dev have their own UIs that show run history and replay.
+
+[Module 19](/m/observability) goes deeper on the signals and the alerting; the rule for background agents specifically: every step writes one structured event, and the run_id stitches them together. Without that, you will spend more time debugging than writing the agent.
+
+### Sandbox · Build a stable idempotency key
+
+<Sandbox
+  id="m15-idempotency-key"
+  mode="js"
+  prompt={<>Implement <code>idempotencyKey({"{ source, id, version }"})</code> returning a stable string of the form <code>{`"${source}:${id}:v${version}"`}</code>. Validate that <code>id</code> is a non-empty string; throw otherwise. Same input always returns the same key. Different version produces a different key.</>}
+  starter={`function idempotencyKey({ source, id, version }) {
+  // your code here
+}
+
+return idempotencyKey;`}
+  test={testIdempotencyKey}
+  hint={<>Validate <code>id</code> is a non-empty string. Return template-literal: <code>{`\`\${source}:\${id}:v\${version}\``}</code>. Empty id should throw.</>}
+/>
+
+</Section>
+
+<Section id="cost" num={9} title="Cost control on always-on agents">
+
+A foreground agent's cost is bounded by user activity. A background agent that runs every 5 minutes for a year is 105,120 runs; even at $0.01 per run, that is over $1000 a year for one workflow. Levers:
+
+- **Cron schedule tuning.** Does the work actually need to run every 5 minutes, or is hourly fine? Most "every minute" cron jobs are over-engineered.
+- **Prompt caching.** Background agents often reuse the same system prompt and tool definitions across thousands of runs. Cache them ([Module 17](/m/cost-economics)).
+- **<GLink slug="batch-api-async">Batch API</GLink>.** Anthropic's Batch API processes requests asynchronously at roughly half the per-token cost, with a 24-hour SLA. Right for non-urgent enrichment, eval suites, content generation. Wrong for anything user-facing.
+- **Model routing.** Background classification turns can use Haiku; only the synthesis step needs Sonnet or Opus. Same lesson as Module 17 applied to scheduled jobs.
+- **Per-run budget caps.** A $0.05 budget per run prevents a runaway loop from costing $500. Cap explicitly; alarm when caps fire.
+- **Output size discipline.** Background agents producing long structured outputs add up fast. Constrain `max_tokens`; structure the output so the model stops when it is done.
+
+The practical math: model your monthly cost from (runs per day) x (cost per run). A background agent that costs $0.10 per run x 1000 runs per day x 30 days is $3000 a month. If your business model cannot absorb that, redesign before launch.
+
+### Sandbox · Pick the async shape
+
+<Sandbox
+  id="m15-pick-async-shape"
+  mode="js"
+  prompt={<>Implement <code>pickAsync(workload)</code> returning <code>"cron"</code>, <code>"queue"</code>, <code>"durable"</code>, or <code>"foreground"</code>. Mappings: <code>"nightly-enrichment-of-rows"</code> -&gt; <code>"cron"</code>; <code>"user-event-triggered-analysis"</code> -&gt; <code>"queue"</code>; <code>"long-workflow-with-retry-guarantees"</code> -&gt; <code>"durable"</code>; <code>"user-is-waiting-for-response"</code> -&gt; <code>"foreground"</code>; <code>"hourly-funding-monitor"</code> -&gt; <code>"cron"</code>. Default for unknown kinds: <code>"foreground"</code>.</>}
+  starter={`function pickAsync(workload) {
+  // your code here
+}
+
+return pickAsync;`}
+  test={testPickAsyncShape}
+  hint={<>Object map plus a fallback. The trigger shape decides: clock -&gt; cron; event -&gt; queue; long flow with retry -&gt; durable; user waiting -&gt; foreground.</>}
+/>
+
+<AsyncLifecycleStepper />
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter's batch-brief is the canonical case</h3>
+
+    <p>Potter ships a <code>batch-brief</code> runtime as the reference for "tool layer plus background agent shell." A scheduled job reads a list of leads, calls Potter MCP tools per lead (research_company, research_person, find_decision_maker), composes a markdown brief, posts to Slack or saves to disk. The per-lead loop is short, but the orchestration runs in the background.</p>
+
+    <p>The agent shell is whatever you want: n8n, Inngest, a Node script with node-cron. Potter is just the tools. The separation matters: MCP is the tool protocol, and background orchestration needs a host. <code>batch-brief</code> is that host wrapped around Potter tools, with idempotency keys per lead, structured logging per call, and dead-letter handling for failed enrichment.</p>
+
+    <p>The lesson: tool layers do not run their own scheduling. Background agents do. The harness that orchestrates is the right place for cron, queues, durable execution, retry policies. Potter stays a callable; the harness decides when and how often.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-foreground-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">foreground agent</p><p className="text-sm text-ink-700">An agent run with a user waiting on the response.</p></div>
+  <div id="glossary-background-agent" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">background agent</p><p className="text-sm text-ink-700">An agent run on a schedule or in response to events, no user blocking.</p></div>
+  <div id="glossary-cron" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">cron</p><p className="text-sm text-ink-700">Scheduling pattern that runs work at fixed intervals (every minute, hour, day).</p></div>
+  <div id="glossary-queue" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">queue</p><p className="text-sm text-ink-700">Event store decoupling producers and consumers; events trigger agent runs.</p></div>
+  <div id="glossary-durable-execution" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">durable execution</p><p className="text-sm text-ink-700">Workflow execution that survives crashes via persisted state. Inngest, Trigger.dev, Temporal.</p></div>
+  <div id="glossary-step" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">step</p><p className="text-sm text-ink-700">A unit of durable execution; runs once and persists its result for replay.</p></div>
+  <div id="glossary-idempotency-key" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">idempotency key</p><p className="text-sm text-ink-700">A stable identifier preventing duplicate work when a job runs twice.</p></div>
+  <div id="glossary-dead-letter" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">dead-letter queue</p><p className="text-sm text-ink-700">Where failed events land after max retries.</p></div>
+  <div id="glossary-exponential-backoff" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">exponential backoff</p><p className="text-sm text-ink-700">Retry policy where delay doubles each attempt, capped.</p></div>
+  <div id="glossary-jitter" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">jitter</p><p className="text-sm text-ink-700">Randomization added to retry delays so clients do not sync up.</p></div>
+  <div id="glossary-escalation" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">escalation</p><p className="text-sm text-ink-700">Surfacing a stuck job to a human after retries are exhausted.</p></div>
+  <div id="glossary-batch-api-async" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">batch API</p><p className="text-sm text-ink-700">API tier that processes requests asynchronously at lower cost.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m15-q1" question="1. Foreground vs background latency budgets?">
+Foreground: under 5 seconds for chat, under 700 ms for voice. Background: minutes to hours, optimized for cost rather than perceived latency. The user's presence (or absence) on the other side is the decisive constraint.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q2" question="2. When does cron beat a queue?">
+When the work is time-bound, not event-bound. Daily reports, hourly enrichment, weekly digests. The trigger is the clock, not an external action. Queues fit when the trigger is a webhook, a user event, or a CDC change; cron fits when the trigger is "it is time".
+</CheckQuestion>
+
+<CheckQuestion id="m15-q3" question="3. Why use durable execution over plain async/await?">
+Survives crashes. The job resumes from the last completed step rather than restarting. Each step has its own retry policy and replay support for debugging; workflow logic is deterministic and replayable, activities are at-least-once with idempotency keys to keep side effects landing at most once. Plain async/await throws away progress on any failure.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q4" question="4. Idempotency keys: why do they matter for retry?">
+Without them, retries duplicate work: same email sent twice, same lead enrolled twice, same payment charged twice. The key plus a dedupe store is what lets you retry safely. Most queue systems guarantee at-least-once delivery; idempotency at the consumer is non-negotiable.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q5" question="5. Exponential backoff plus jitter: why both?">
+Backoff reduces overload pressure on a failing dependency: each retry waits longer than the last, so the dependency gets time to recover. Jitter prevents thundering-herd retry waves: without it, two clients failing at the same moment retry at the same moment, perpetuating the problem. Together they make the retry curve survivable.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q6" question="6. Long-running agent (hours): approach?">
+Break into steps, persist state between steps, run each step as a fresh API session, resume from persisted state. Durable execution platforms (Inngest, Trigger.dev, Temporal) automate this; rolling your own with Postgres works too. The discipline: every step is small, idempotent, and individually retryable.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q7" question="7. When does the batch API beat real-time inference?">
+Background jobs with no SLA on response time. Cuts cost by roughly half in exchange for asynchronous turnaround (24 hours typical). Right for eval suites, large enrichment runs, content generation. Wrong for anything user-facing or anything where the result must arrive in minutes.
+</CheckQuestion>
+
+<CheckQuestion id="m15-q8" question="8. Why is Potter's batch-brief a separate runtime, not just MCP?">
+MCP is the tool protocol; it does not orchestrate. Background work needs a host that schedules, retries, dedupes, and logs. <code>batch-brief</code> is that host wrapped around Potter tools. The separation keeps Potter portable: any harness can consume Potter via MCP, and batch-brief is one specific harness optimized for scheduled enrichment.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the background agent playbook: cron versus queues versus durable, idempotency, retry policy with backoff and jitter, observability per run. Track 3 ends here. Track 4 begins with the question every production agent must answer: did it actually work?
+
+<CompleteBanner moduleId="m15" nextSlug="evaluation" nextTitle="Module 16 · Evaluation and testing" />
+
+</Section>
+
+<ModuleNav prevSlug="voice-realtime" prevTitle="Module 14 · Voice and realtime agents" nextSlug="evaluation" nextTitle="Module 16 · Evaluation and testing" />

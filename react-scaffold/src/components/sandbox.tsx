@@ -7,7 +7,14 @@ import { oneDark } from '@codemirror/theme-one-dark';
 import { EditorView, highlightActiveLine, keymap, lineNumbers } from '@codemirror/view';
 import { useEffect, useRef, useState } from 'react';
 import { markSandbox } from '../lib/progress';
-import { clearKey, ensureKey, getKey, setKey } from '../lib/sandbox/anthropic-client';
+import {
+  clearKey,
+  ensureKey,
+  getKey,
+  isPersistent,
+  setKey,
+  setPersistent
+} from '../lib/sandbox/anthropic-client';
 import { runAnthropicMode, runJsMode } from '../lib/sandbox/runner';
 import type { RunLine, RunResult, SandboxConfig, Verdict } from '../lib/sandbox/types';
 
@@ -38,7 +45,7 @@ function formatValue(value: unknown): string {
 }
 
 function truncateKey(key: string): string {
-  return key.length <= 14 ? key : `${key.slice(0, 7)}...${key.slice(-4)}`;
+  return key.length <= 4 ? key : `...${key.slice(-4)}`;
 }
 
 export default function Sandbox(config: SandboxConfig) {
@@ -50,6 +57,7 @@ export default function Sandbox(config: SandboxConfig) {
   const editorHostRef = useRef<HTMLDivElement>(null);
   const viewRef = useRef<EditorView | null>(null);
   const savedKey = keyPanelTick >= 0 && config.mode === 'anthropic' ? getKey() : null;
+  const persistent = keyPanelTick >= 0 && config.mode === 'anthropic' ? isPersistent() : false;
 
   useEffect(() => {
     if (!editorHostRef.current) return;
@@ -137,6 +145,11 @@ export default function Sandbox(config: SandboxConfig) {
     setKeyPanelTick((tick) => tick + 1);
   }
 
+  function handleTogglePersistent() {
+    setPersistent(!persistent);
+    setKeyPanelTick((tick) => tick + 1);
+  }
+
   const outputLines = output?.error
     ? [...output.lines, { level: 'error' as const, text: output.error.message }]
     : output?.lines;
@@ -151,7 +164,7 @@ export default function Sandbox(config: SandboxConfig) {
       </div>
 
       {config.prompt ? <div className="rounded-xl bg-clay-bg p-4 text-sm text-ink-900">{config.prompt}</div> : null}
-      <div ref={editorHostRef} className="overflow-hidden rounded-xl bg-[#1A2530]" />
+      <div ref={editorHostRef} aria-label="Code editor" className="overflow-hidden rounded-xl bg-[#1A2530]" />
 
       <div className="flex flex-wrap items-center justify-between gap-4">
         <div className="flex flex-wrap gap-2">
@@ -198,16 +211,42 @@ export default function Sandbox(config: SandboxConfig) {
       {hintOpen && config.hint ? <div className="rounded-2xl bg-clay-bg p-4 text-sm text-ink-700">{config.hint}</div> : null}
 
       {config.mode === 'anthropic' ? (
-        <div className="flex flex-wrap items-center justify-between gap-3 rounded-xl bg-clay-bg p-3 text-sm text-ink-700">
-          <span>
-            {savedKey ? <>key: <code className="font-mono">{truncateKey(savedKey)}</code></> : 'No API key saved'}
-          </span>
-          {savedKey ? (
-            <button type="button" className="text-accent-coral" onClick={handleClearKey}>Clear key</button>
-          ) : (
-            <button type="button" className="text-accent-coral" onClick={handleSetKey}>Set key</button>
-          )}
-        </div>
+        <>
+          <p className="rounded-xl border border-red-200 bg-red-50 p-3 text-xs text-red-700">
+            Sandbox code runs in this page's context. Do not paste code from sources you do not trust.
+          </p>
+          <div className="space-y-2 rounded-xl bg-clay-bg p-3 text-sm text-ink-700">
+            <div className="flex flex-wrap items-center justify-between gap-3">
+              <span>
+                {savedKey ? (
+                  <>
+                    key: <code className="font-mono">{truncateKey(savedKey)}</code>{' '}
+                    <span className="text-xs text-ink-500">({persistent ? 'this device' : 'this tab'})</span>
+                  </>
+                ) : (
+                  'No API key saved'
+                )}
+              </span>
+              {savedKey ? (
+                <button type="button" className="text-accent-coral" onClick={handleClearKey}>Clear key</button>
+              ) : (
+                <button type="button" className="text-accent-coral" onClick={handleSetKey}>Set key</button>
+              )}
+            </div>
+            <label className="flex items-center gap-2 text-xs text-ink-500">
+              <input
+                type="checkbox"
+                checked={persistent}
+                onChange={handleTogglePersistent}
+                className="h-3 w-3"
+              />
+              Remember on this device (uses localStorage instead of sessionStorage)
+            </label>
+            <p className="text-xs text-ink-500">
+              By default the key stays in <code className="font-mono">sessionStorage</code> and clears when you close the tab. Calls go directly to <code className="font-mono">api.anthropic.com</code>; no proxy, no logging server.
+            </p>
+          </div>
+        </>
       ) : null}
     </section>
   );

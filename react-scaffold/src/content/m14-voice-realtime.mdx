@@ -1,0 +1,366 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  VoiceArchitectureDemo,
+  VoicePipelineStepperDemo,
+  testPickVoiceArch,
+  testLatencyBudget
+} from './m14-voice-realtime';
+
+<ModuleHero
+  kicker="Module 14 · Voice and realtime agents"
+  title="Latency in milliseconds, not seconds"
+  lead="Voice changes everything. Latency budgets shrink from seconds to hundreds of milliseconds. Conversation has to feel natural, which means barge-in, interruption, partial-result handling. The Realtime APIs and Vapi-style stacks are a different shape than text agents and the design moves with them."
+  trackId="building"
+  moduleId="m14"
+/>
+
+<Toc items={[
+  { href: '#why-voice', label: 'Why voice changes the architecture' },
+  { href: '#pipeline', label: 'The pipeline: ASR, LLM, TTS' },
+  { href: '#realtime', label: 'The OpenAI Realtime API' },
+  { href: '#anthropic-voice', label: 'Anthropic and voice' },
+  { href: '#managed-voice', label: 'Vapi, Retell, Bland' },
+  { href: '#vad', label: 'Voice activity detection' },
+  { href: '#phone', label: 'Phone agents: outbound and inbound' },
+  { href: '#tools-mid-turn', label: 'Tool calls during voice turns' },
+  { href: '#failures', label: 'Common failure modes' },
+  { href: '#when-voice', label: 'When voice is the right interface' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="why-voice" num={1} title="Why voice changes the architecture">
+
+A text agent can take three seconds to respond and feel responsive. A voice agent that takes three seconds feels broken. Voice forces architecture changes you do not see in text:
+
+- **Streaming all the way through.** Every stage (audio capture, ASR, LLM, TTS, audio playback) must stream. Buffering anywhere collapses the latency budget.
+- **Parallel ASR and LLM.** The LLM begins to receive transcript while the user is still speaking, not after. Some stacks fire the LLM call on a complete-thought heuristic before end-of-utterance.
+- **<GLink slug="vad">VAD</GLink> for turn-taking.** The agent has to know when the user is talking versus silent versus done. Without VAD, the agent talks over the user or waits forever to respond.
+- **<GLink slug="barge-in">Barge-in</GLink>.** When the user interrupts, the agent stops mid-sentence. TTS cancels, the LLM call cancels, the pipeline restarts at the user's new utterance.
+- **<GLink slug="full-duplex">Full-duplex</GLink> when phone-call-like.** Both sides speak simultaneously. Half-duplex is walkie-talkie style and feels less natural.
+
+Each of these adds engineering surface that text agents simply do not have.
+
+<VoicePipelineStepperDemo />
+
+</Section>
+
+<Section id="pipeline" num={2} title="The pipeline: ASR, LLM, TTS">
+
+The classic three-stage pipeline:
+
+- **<GLink slug="asr-voice">ASR</GLink>: audio in, text out.** Whisper (OpenAI), Deepgram, AssemblyAI, the Realtime API's own ASR. Streaming-capable models return partial transcripts every few hundred milliseconds; non-streaming models wait for end-of-utterance and return one result.
+- **LLM: text in, text out.** Same Claude or GPT or Gemini call you would make in any text agent, with one extra constraint: streaming required, with a tight TTFT budget. Haiku-class models hit 200 to 500 ms TTFT; larger models are slower.
+- **<GLink slug="tts-voice">TTS</GLink>: text in, audio out.** ElevenLabs streaming, OpenAI TTS streaming, Cartesia, Play.ht. Streaming TTS produces audio chunks as soon as the first tokens arrive, not after the full response.
+
+Latency adds up. A naive sum: 200 ms ASR + 300 ms LLM TTFT + 200 ms TTS time-to-first-audible = 700 ms. That is the upper bound of what feels natural. Tighter is better; voice products optimize this number relentlessly.
+
+<Mermaid chart={`flowchart LR
+  MIC["mic / phone"] --> VAD["VAD"]
+  VAD -->|speech frames| ASR["ASR streaming"]
+  ASR -->|partial transcript| LLM["LLM streaming"]
+  LLM -->|tokens| TTS["TTS streaming"]
+  TTS -->|audio chunks| OUT["speaker / phone"]
+  OUT --> MIC
+  classDef stage fill:#FFE5B4,stroke:#E8A87C,color:#1A2530;
+  class VAD,ASR,LLM,TTS stage`} />
+
+<p className="text-sm text-ink-500">The pipeline has to stream end to end. Every buffer is a latency hit.</p>
+
+</Section>
+
+<Section id="realtime" num={3} title="The OpenAI Realtime API">
+
+OpenAI's <GLink slug="realtime-api">Realtime API</GLink> collapses ASR, LLM, and TTS into a single streaming session. It went GA in August 2025 with the `gpt-realtime` model. Two transports are supported: WebRTC (recommended for browser and mobile clients) and WebSocket (typical for server-to-server). Audio in, audio out, function calling preserved. Why this matters:
+
+- **One provider, one connection.** The integration overhead of three separate streaming services collapses to one. No glue code for ASR-to-LLM hand-off, no TTS streaming buffer management.
+- **Tighter latency.** Internal optimizations across the stages (shared inference passes, predictive TTS) get latency lower than the DIY pipeline can.
+- **Built-in VAD.** Turn-taking is handled by the API; you configure thresholds rather than implementing detection yourself.
+- **Function calling preserved.** Tools are first-class: the model can emit tool_use mid-conversation, your client executes, returns results, the model continues speaking.
+- **Session-shaped.** Each call is a long-lived streaming session (WebRTC for browser, WebSocket for server), not a series of stateless requests. State persistence across turns is handled at the protocol level.
+
+When the Realtime API wins:
+
+- Bespoke voice in your own product where you control the UX (in-app voice assistants, custom agents).
+- Latency-critical interactions where every millisecond counts.
+- OpenAI-aligned stacks where provider portability is not the priority.
+
+When it loses:
+
+- Phone-first products. Realtime is voice infra, not a phone platform. Vapi/Retell wrap it (or their own equivalent) with phone routing, voicemail, transfer, IVR.
+- Anthropic-aligned stacks. Realtime is OpenAI-only; switching providers is a full re-architecture.
+- Cost-sensitive workloads. Realtime is more expensive per minute than the DIY pipeline because you are paying for the integration.
+
+<CodeBlock lang="ts">{`// Sketch of a Realtime session.
+const ws = new WebSocket('wss://api.openai.com/v1/realtime');
+ws.onopen = () => {
+  ws.send(JSON.stringify({
+    type: 'session.update',
+    session: {
+      voice: 'alloy',
+      instructions: 'You are a concise, friendly assistant.',
+      tools: [/* your function definitions */],
+      turn_detection: { type: 'server_vad' }
+    }
+  }));
+};
+
+ws.onmessage = (event) => {
+  const msg = JSON.parse(event.data);
+  switch (msg.type) {
+    case 'response.audio.delta':
+      // play audio chunk
+      break;
+    case 'response.function_call_arguments.done':
+      // execute tool, send results back
+      break;
+    // ...
+  }
+};`}</CodeBlock>
+
+</Section>
+
+<Section id="anthropic-voice" num={4} title="Anthropic and voice">
+
+As of 2026, Anthropic ships consumer voice in the Claude apps (push-to-talk on iOS and Android, plus a voice mode in Claude Code). What it does not yet ship is a developer-facing audio-in / audio-out API primitive comparable to OpenAI's Realtime API. The Claude API surface for developers remains text and (on multimodal-capable models) image input.
+
+What that means in practice for developer-facing voice agents:
+
+- Voice agents wrapping Claude use the DIY pipeline: Whisper or Deepgram for ASR, Claude for the text reasoning step, ElevenLabs or OpenAI TTS for output.
+- Latency is higher than the Realtime API path because you are stitching three providers, but the LLM quality on the reasoning step can be higher (Claude on hard reasoning, voice-friendly TTS on output).
+- For tool-heavy voice agents, this is often the right trade: Claude's tool-use reliability plus a managed voice front-end (Vapi or Retell can call any LLM, including Claude) gets you the loop quality without the managed-platform lock-in.
+
+Verify the current state when you commit. Anthropic's roadmap may have shipped a developer-facing audio primitive by the time you read this; the principles here hold either way.
+
+</Section>
+
+<Section id="managed-voice" num={5} title="Vapi, Retell, Bland: managed voice agent platforms">
+
+Three platforms compete for the "managed voice agent" slot:
+
+- **<GLink slug="vapi">Vapi</GLink>.** Orchestrates ASR + LLM + TTS via API. You configure a voice assistant: pick the model (any major provider including Claude), pick the voice, write a system prompt. Vapi handles the streaming, VAD, barge-in, phone integration. Strong on programmatic control.
+- **<GLink slug="retell">Retell</GLink>.** Phone-first focus. Inbound and outbound calling, voicemail, call transfer, IVR replacement. Configurable via API or dashboard. Often the right pick for "I want a phone agent and I do not want to build the phone layer."
+- **<GLink slug="bland">Bland</GLink>.** Outbound-heavy. Sales calls, follow-ups, reminders. Aggressive pricing on outbound, useful for high-volume campaigns where compliance and quality monitoring matter.
+
+The trade-off in one line: managed platforms get you to production fast but lock you into their orchestration. The agent loop's quality is bounded by the LLM you can configure; everything else (audio quality, latency, phone integration) is the platform's call. For high-volume phone work where you do not want to be in the phone-infra business, the trade is usually worth it.
+
+Pricing varies wildly. Verify per-platform when you commit and run real-traffic comparisons before committing to one for a production deployment.
+
+</Section>
+
+<Section id="vad" num={6} title="VAD: voice activity detection">
+
+The agent has to know when the user is speaking, when they are silent, and when they are done. <GLink slug="vad">VAD</GLink> answers all three.
+
+The patterns:
+
+- **Energy-based.** Threshold on the audio waveform amplitude. Cheapest, works for clean audio, fails on noisy environments (cars, cafes, phones).
+- **Model-based.** A small ML model classifies frames as speech vs non-speech. Robust across noisy conditions; default in modern stacks (Silero VAD, the Realtime API's server_vad).
+- **End-of-utterance detection.** A separate problem from start-of-utterance: when has the user finished a thought? Most stacks use a silence threshold (300 to 800 ms of silence after speech), tuned per use case.
+
+The trade-off: longer silence threshold means fewer false interruptions but slower turn-taking; shorter silence threshold means snappier responses but more false fires when the user pauses to think. Tune for the use case. Customer service: 500 to 800 ms. Casual conversation: 300 to 500 ms.
+
+Without VAD, the agent either talks over the user (no end-of-utterance detection) or waits forever to respond (no start detection). VAD is non-optional in voice; the Realtime API and managed platforms include it; the DIY pipeline must add it explicitly.
+
+</Section>
+
+<Section id="phone" num={7} title="Phone agents: outbound and inbound">
+
+Phone is where voice agents most often live in production. The two shapes:
+
+- **Inbound.** A customer calls; the agent answers. Use cases: support triage, IVR replacement, simple lookups (order status, appointment confirmation). Quality bar: must handle accents, background noise, partial speech, and routing to human when out of depth.
+- **Outbound.** The agent calls a customer. Use cases: appointment reminders, lead qualification, post-call surveys. Compliance bar is much higher: regulations apply.
+
+The infrastructure:
+
+- **Twilio** as the most common phone-network provider. Connects PSTN to your voice infra via Programmable Voice or Media Streams.
+- Managed platforms (Retell, Vapi, Bland) wrap Twilio (or their own carrier) and the voice loop in one product.
+
+<Callout kind="warn" title="TCPA and outbound voice">
+In the US, the <GLink slug="tcpa">TCPA</GLink> regulates automated outbound calls. Marketing calls historically required prior express written consent; transactional calls have different rules; debt collection has its own framework. The Fifth Circuit's February 2026 ruling in Bradford v. Sovereign Pest Control held the FCC overreached on the written-consent requirement, so the standard is now circuit-dependent and likely heading to further appellate review. Penalties remain per-call and add up fast. The general rule still holds: never make an outbound automated call without auditable consent for that recipient and that purpose. EU rules under GDPR and ePrivacy add their own constraints. Get legal review before scaling outbound voice.
+</Callout>
+
+Call quality in production:
+
+- **Codec.** Phone networks compress audio aggressively (g.711, Opus narrowband). ASR quality drops; tune your model and vocabulary for phone audio.
+- **Background noise.** Customers call from cars, supermarkets, kids in the background. Robust VAD and ASR matter more than they do in clean studio audio.
+- **Drop-outs.** Networks drop frames; the agent has to handle missing audio gracefully (do not panic; resume from last full transcript).
+
+</Section>
+
+<Section id="tools-mid-turn" num={8} title="Tool calls during voice turns">
+
+Tool calls in voice work the same way they do in text: the model emits a tool_use, your code executes, results come back, the model continues. The voice-specific wrinkle: tool calls add latency mid-conversation, and the user is listening.
+
+Three patterns to handle the latency:
+
+- **Pre-fetch where possible.** If the agent will likely need a customer's order history during a support call, fetch it in parallel with the greeting, not on demand mid-turn.
+- **Speak before you fetch.** "One moment, let me pull up your order..." filling silence while the tool runs. Better than dead air.
+- **Background tool calls with progress speech.** "I am checking that for you. Can you hold for a few seconds?" buying time on multi-second tool calls. Avoid for fast tools (under 500 ms) where the gap is invisible.
+
+Tool design specifically for voice:
+
+- **Keep tools fast.** Tool calls over 1 second feel awkward in voice. If a tool is slow, redesign or background it.
+- **Return small, prose-friendly results.** The model has to read the result aloud. A 50-row table from a tool wastes tokens and confuses the synthesis. Prefer a one-sentence summary plus a "want me to email you the full list?" follow-up.
+- **Handle failures conversationally.** "I am having trouble pulling that up right now; can I take your number and call back?" feels much better than "tool call returned error code 502."
+
+</Section>
+
+<Section id="failures" num={9} title="Common failure modes">
+
+A short field guide:
+
+- **ASR mistakes propagate.** The model misheard "Sarah" as "Sara"; the agent now acts on the wrong name. Mitigations: confirm critical fields back to the user before action; phonetic spelling for proper nouns; custom vocabularies per use case.
+- **TTS pronunciation of names and numbers.** "Skendzic" is rarely pronounced right; phone numbers run together. Mitigations: phonetic SSML where supported, spell-out hints for hard names, normalize numbers to "five-five-five..." format.
+- **Interruption mid-word.** Barge-in fires; TTS cuts mid-syllable; sounds awful. Mitigations: barge-in at word boundaries when possible, avoid extremely long sentences.
+- **Awkward silences.** Tool call takes 4 seconds; user hears nothing; thinks the call dropped. Mitigations: speak before you fetch, fill silence with "one moment".
+- **Accent and dialect coverage.** ASR struggles with accents not well-represented in training data. Mitigations: pick ASR models tested on your user demographics; allow user to opt for human escalation when conversation breaks down twice.
+- **VAD too sensitive.** Background noise triggers false-end-of-utterance; the agent jumps in mid-thought. Mitigations: longer silence threshold, model-based VAD, noise suppression upstream.
+- **VAD too lazy.** Long silence threshold means the agent waits 2 seconds after the user finishes; conversation feels slow. Mitigations: shorter silence threshold for casual chat; user-driven turn-taking ("done" or "go ahead") for ambiguous cases.
+
+### Sandbox · Pick the architecture
+
+<Sandbox
+  id="m14-pick-architecture"
+  mode="js"
+  prompt={<>Implement <code>pickVoiceArch(useCase)</code>. Mappings: <code>"customer-service-phone-agent-at-scale"</code> -&gt; <code>"vapi-or-retell"</code>; <code>"bespoke-streaming-voice-in-product"</code> -&gt; <code>"realtime-api"</code>; <code>"one-off-transcription-with-simple-action"</code> -&gt; <code>"asr-llm-tts-pipeline"</code>; <code>"voice-not-needed"</code> -&gt; <code>"text-only"</code>; <code>"inbound-support-call-routing"</code> -&gt; <code>"vapi-or-retell"</code>.</>}
+  starter={`function pickVoiceArch(useCase) {
+  // your code here
+}
+
+return pickVoiceArch;`}
+  test={testPickVoiceArch}
+  hint={<>Object map. Phone-shaped at scale -&gt; managed; bespoke product UX -&gt; Realtime; one-off -&gt; pipeline; not actually voice -&gt; text-only.</>}
+/>
+
+### Sandbox · Latency budget math
+
+<Sandbox
+  id="m14-latency-budget"
+  mode="js"
+  prompt={<>Export an object <code>{`{ voiceLatencyBudget, isAcceptable }`}</code> where <code>voiceLatencyBudget(input)</code> returns the sum of <code>asrMs + llmTtftMs + ttsTtftMs</code> in milliseconds and <code>isAcceptable(totalMs)</code> returns true only if <code>totalMs &lt; 700</code>. The 700 ms cutoff is strict (700 itself is not acceptable).</>}
+  starter={`function voiceLatencyBudget(input) {
+  // your code here
+}
+
+function isAcceptable(totalMs) {
+  // your code here
+}
+
+return { voiceLatencyBudget, isAcceptable };`}
+  test={testLatencyBudget}
+  hint={<>Sum the three numbers. The threshold is strict less-than: <code>totalMs &lt; 700</code>, not <code>&lt;=</code>.</>}
+/>
+
+</Section>
+
+<Section id="when-voice" num={10} title="When voice is the right interface">
+
+The honest framing: voice is often not the right interface even when it is technically possible. Voice wins when:
+
+- **Hands-free contexts.** Driving, cooking, walking. Anything where typing is inconvenient or impossible.
+- **Accessibility.** Users with motor impairments, low vision, or other reasons text input is hard.
+- **Phone-only flows.** Customer service, IVR replacement, debt collection, appointment confirmations. The user already has a phone and is going to use it.
+- **High-emotion moments.** Sales close calls, condolence calls, anything where tone and pacing matter as much as content.
+
+Voice is wrong when:
+
+- **Dense info.** Numbers, addresses, lists, code. Reading aloud is slower and easier to mis-hear than reading.
+- **Multi-step decisions with visual reference.** Comparing options, reading a contract, navigating a complex UI. Voice cannot show; the user has to remember.
+- **Contexts where typing is faster.** Most desktop and laptop work. Most professional contexts where the user is at a keyboard.
+
+<VoiceArchitectureDemo />
+
+The decision rule: voice is a delivery mechanism, not the interface itself. If the underlying task is genuinely conversational and the user is hands-free or phone-bound, voice wins. Otherwise, the same agent works better as text.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is text-only by design</h3>
+
+    <p>Potter does not process audio. No ASR, no TTS, no Realtime API integration. Tools take typed inputs and return structured data. This is the same rule as Module 11's "memory belongs to the harness, not the tool": voice is a delivery mechanism, and coupling it to the tool layer would bloat Potter's surface and break portability across deployments.</p>
+
+    <p>The harness layer is free to be voice. A Vapi assistant configured to call Potter via MCP works exactly like a text harness calling Potter via MCP. A Realtime API session that exposes Potter tools as functions sees the same tool surface as Claude Code does. Potter does not know or care which it is.</p>
+
+    <p>The lesson, the same one this module made for memory: keep modality at the harness layer. Tool layers stay clean and portable; the harness owns the voice plumbing, the latency budget, the barge-in, the phone integration. When voice changes (Anthropic ships a Realtime equivalent, a new platform appears, the user wants a phone bot instead of a chat bot), Potter does not change.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-asr-voice" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ASR</p><p className="text-sm text-ink-700">Automatic speech recognition. Audio in, text out. Whisper, Deepgram, AssemblyAI.</p></div>
+  <div id="glossary-tts-voice" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">TTS</p><p className="text-sm text-ink-700">Text-to-speech. Text in, audio out. ElevenLabs, OpenAI TTS, Cartesia.</p></div>
+  <div id="glossary-realtime-api" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Realtime API</p><p className="text-sm text-ink-700">OpenAI's audio-in audio-out streaming API with function calling. GA since August 2025; WebRTC for browser/mobile, WebSocket for server-to-server.</p></div>
+  <div id="glossary-vapi" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Vapi</p><p className="text-sm text-ink-700">Managed voice agent platform orchestrating ASR + LLM + TTS via API.</p></div>
+  <div id="glossary-retell" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Retell</p><p className="text-sm text-ink-700">Managed voice agent platform, phone-first focus.</p></div>
+  <div id="glossary-bland" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Bland</p><p className="text-sm text-ink-700">Outbound voice agent platform, often used for high-volume sales and reminders.</p></div>
+  <div id="glossary-vad" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">VAD</p><p className="text-sm text-ink-700">Voice activity detection. Determines when the user is speaking versus silent.</p></div>
+  <div id="glossary-barge-in" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">barge-in</p><p className="text-sm text-ink-700">The ability for the user to interrupt the agent mid-speech.</p></div>
+  <div id="glossary-ttft-voice" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">TTFT (voice)</p><p className="text-sm text-ink-700">Time to first audible token. The wall time between user finishing and agent's first sound.</p></div>
+  <div id="glossary-half-duplex" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">half-duplex</p><p className="text-sm text-ink-700">One side talks at a time. Walkie-talkie mode.</p></div>
+  <div id="glossary-full-duplex" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">full-duplex</p><p className="text-sm text-ink-700">Both sides can talk simultaneously. Phone-call mode.</p></div>
+  <div id="glossary-tcpa" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">TCPA</p><p className="text-sm text-ink-700">US regulation governing automated calls and texts. Affects outbound voice agents.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m14-q1" question="1. Why does voice force architecture changes text agents do not need?">
+Latency budgets shrink from seconds to hundreds of milliseconds. Streaming end-to-end, parallel ASR-LLM-TTS, voice activity detection, barge-in, full-duplex turn-taking are all required. Text agents can finish thinking before responding; voice cannot.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q2" question="2. What is an acceptable end-to-end latency for natural voice conversation?">
+Under 700 ms perceived (from end-of-user-speech to first-audible-agent-token) is the target. 1 second feels slow. 2 seconds feels broken. The pipeline (VAD + ASR + LLM TTFT + TTS time-to-first-audible) has to fit inside that budget; every stage is shaved relentlessly in production.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q3" question="3. Realtime API vs Vapi/Retell: when does each win?">
+Realtime API for bespoke voice in your own product where you own the UX. Vapi/Retell when you want managed phone agents at scale with less engineering: phone integration, call routing, voicemail, IVR replacement. Realtime is voice infra; Vapi/Retell wrap voice infra plus phone infra plus orchestration.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q4" question="4. VAD: what does it actually do?">
+Detects when the user is speaking versus silent, plus end-of-utterance. Without VAD, the agent talks over the user (no end detection) or waits forever to respond (no start detection). Modern stacks use model-based VAD (Silero, server_vad in the Realtime API) for robustness across noisy environments.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q5" question="5. Common ASR failure mode that propagates?">
+Mishearing names or numbers. The model acts on the wrong input downstream. Mitigations: confirm critical fields back to the user before taking action, use phonetic spelling for proper nouns, tune ASR custom vocabularies per use case.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q6" question="6. TCPA and outbound voice agents: what is the rough rule?">
+In the US, automated outbound calls require prior express consent for marketing. The "prior express written consent" standard has been challenged: the Fifth Circuit's Feb 2026 ruling in Bradford v. Sovereign Pest Control held the FCC overreached, so the written-consent default is now circuit-dependent. Different rules for transactional, debt collection, etc. Penalties are per-call and add up fast. EU/GDPR adds its own constraints. Never make an outbound automated call without auditable consent for that recipient and purpose. Get legal review before scaling.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q7" question="7. When is voice the wrong interface?">
+Dense info (numbers, lists, code), multi-step decisions with visual reference, and contexts where typing is faster (most desktop work). Voice is a delivery mechanism, not the interface itself. If the underlying task is not conversational and the user is at a keyboard, the same agent works better as text.
+</CheckQuestion>
+
+<CheckQuestion id="m14-q8" question="8. Why does Potter not handle voice?">
+Voice belongs at the harness layer, not the tool layer. Coupling audio processing to a tool layer would bloat the surface and break portability across deployments. The harness can be voice (Vapi, Realtime API) and call Potter as a text MCP server; Potter stays modality-agnostic.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the voice playbook: latency budgets, the three-stage pipeline, the Realtime versus managed versus DIY trade, VAD, barge-in, phone agent regulation. The next module is the opposite end of the latency spectrum: agents that run for hours in the background.
+
+<CompleteBanner moduleId="m14" nextSlug="async-agents" nextTitle="Module 15 · Background and async agents" />
+
+</Section>
+
+<ModuleNav prevSlug="browser-automation" prevTitle="Module 13 · Browser and web automation" nextSlug="async-agents" nextTitle="Module 15 · Background and async agents" />

@@ -10,3 +10,4 @@ node_modules/
 .cache/
 dist/
 .claude/settings.local.json
+docs/design/

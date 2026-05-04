@@ -1,102 +1,130 @@
-# AI Agent Engineering
+<p align="center">
+  <img src="react-scaffold/public/illustrations/mascot-hero.png" alt="AI Agent Engineering mascot" width="180" />
+</p>
 
-A self-paced, open-source course on building real AI agents with the Claude API. Thirteen modules, one HTML file each, full interactive sandboxes where you write code that runs against your own Anthropic API key. No build step, no auth, no backend. Open `index.html` and learn.
+<p align="center">
+  <h1 align="center">AI Agent Engineering</h1>
+  <p align="center">A self-paced, open-source course on building real AI agents with the Claude API. 25 modules, runnable sandboxes, no hosting.</p>
+</p>
 
-## What you will be able to do after this course
+<p align="center">
+  <a href="LICENSE"><img alt="MIT License" src="https://img.shields.io/badge/license-MIT-blue.svg"></a>
+  <img alt="Modules" src="https://img.shields.io/badge/modules-25-FF8C66">
+  <img alt="Tracks" src="https://img.shields.io/badge/tracks-5-A78BFA">
+  <img alt="Stack" src="https://img.shields.io/badge/stack-React%20%2B%20MDX-22D3EE">
+</p>
 
-- Read a Claude API call and explain every field
-- Implement a real agentic loop from scratch in twenty lines
-- Tell the difference between an API, an SDK, a CLI, and an MCP server, and pick the right shape for a job
-- Design tools that the model actually picks correctly
-- Compose subagents and parallel patterns instead of one-shot prompts
-- Wire Claude Code together with skills, plugins, hooks, slash commands, and MCP
-- Build evaluations that catch regressions before users do
-- Deploy an agent without leaking secrets, exhausting budgets, or trusting input from tools
+## what it is
 
-## What is in the box
+A 25-module course covering the full stack of modern AI agent engineering: primitives, inference, tools, memory, structured output, browser and voice agents, async patterns, evaluation, cost, security, observability, open-source models, coding agents, and three concrete GTM agent builds. Every module ships with prose, mermaid diagrams, interactive demos, runnable code sandboxes, a glossary, and check questions.
 
-```
-Foundations
-  M01  Primitives                  Available
-  M02  Agent patterns              Coming soon
-  M03  Prompt engineering          Coming soon
+Built around the Claude API as the reference primitive. BYOK only. Open source under MIT. No hosting, no telemetry, no leaderboard. Clone the repo and run it locally.
 
-Interfaces and harnesses
-  M04  API · SDK · CLI · MCP       Coming soon
-  M05  Harnesses                   Coming soon
-  M06  Claude Code extensions      Coming soon
-  M07  Managed agent platforms     Coming soon
-
-Tools, memory, automation
-  M08  Tool design at scale        Coming soon
-  M09  Memory and retrieval        Coming soon
-  M10  Browser and web automation  Coming soon
-
-Production
-  M11  Evaluation and testing      Coming soon
-  M12  Cost, security, observability  Coming soon
-
-Case study
-  M13  Potter through this lens    Coming soon
-```
-
-Each module is a single HTML file with prose, code samples, mermaid diagrams, interactive demos, and runnable code sandboxes with hidden tests that verify your solution.
-
-## Quick start
-
-Clone, then open `index.html` in a browser. That is the whole setup.
+## quick start
 
 ```bash
-git clone https://github.com/<your-github>/ai-agent-engineering.git
-cd ai-agent-engineering
-open index.html
+git clone https://github.com/Mihailo2501/ai-agent-engineering.git
+cd ai-agent-engineering/react-scaffold
+npm install
+npm run dev
+# open http://localhost:5173
 ```
 
-If you want to run it from a local web server instead of `file://`, the bundled npm script uses Python's built-in HTTP server:
+The dev server live-reloads on edits. For a production build:
 
 ```bash
-npm run serve
-# then open http://localhost:8080
+npm run build
+npm run preview
 ```
 
-The repo has zero npm dependencies. The `package.json` is metadata plus the convenience script.
+The course runs entirely in the browser. The only external dependency at runtime is the Anthropic API itself, and only for the BYOK sandboxes.
 
-## Sandboxes
+## try it
 
-Most modules contain runnable code sandboxes. Two execution modes:
+- Open Module 01 to see how an LLM call actually works, then write your first 20-line agent.
+- Open Module 11 to walk through a RAG pipeline stage by stage.
+- Open Module 17 and play with the cost calculator (slider for input tokens, output tokens, cache ratio, model choice).
+- Open the [Glossary](http://localhost:5173/glossary) for every term in the course, indexed alphabetically with backlinks.
 
-1. **In-browser JavaScript.** Structural exercises (build a tool definition, parse content blocks, write a stop_reason switch). Code runs in a sandboxed scope in your browser. No data leaves the page.
-2. **BYOK Anthropic API.** "Build a real agent loop" exercises that hit the actual `/v1/messages` endpoint. You paste your own Anthropic API key once, it lives in your browser's localStorage, and requests go directly from your browser to Anthropic with the `anthropic-dangerous-direct-browser-access` header.
+## what is in the box
 
-Hidden tests verify your solution. Pass = green, fail = explanation of what is off.
+```
+Track 1 · Foundations (5)
+  M01  Primitives
+  M02  Inference
+  M03  Agent patterns
+  M04  Prompt engineering for agents
+  M05  Multimodal and reasoning models
 
-## What this course is not
+Track 2 · Interfaces (4)
+  M06  API · SDK · CLI · MCP
+  M07  Harnesses
+  M08  Claude Code extension surface
+  M09  Managed agent platforms
 
-- Not a tutorial on prompt-only LLM use. We assume you have written prompts before. The first hour you can already build a chatbot. This course starts where that ends.
-- Not an introduction to programming. Reading and writing JavaScript is a prerequisite.
-- Not a vendor pitch. Specific platforms get covered when they teach something useful, not because they are sponsoring anything.
+Track 3 · Building (6)
+  M10  Tool design at scale
+  M11  Memory and retrieval
+  M12  Structured output
+  M13  Browser and web automation
+  M14  Voice and realtime agents
+  M15  Background and async agents
 
-## Progress and badges
+Track 4 · Production (4)
+  M16  Evaluation and testing
+  M17  Cost economics
+  M18  Security and adversarial
+  M19  Observability and deployment
 
-Your completion state is stored in your browser's localStorage. The course hub shows which modules are done, which sandboxes you have passed, and badges you have earned. Clear localStorage to reset.
+Track 5 · Applied (6)
+  M20  Open source models and Hugging Face
+  M21  Coding agents in depth
+  M22  GTM agent: cold email drafter via Gmail drafts
+  M23  GTM agent: weekly funding monitor
+  M24  GTM agent: meeting prep
+  M25  Potter case study
+```
 
-Nothing is uploaded anywhere. There is no account, no telemetry, no leaderboard. This is a single-player learning tool.
+Roughly 14 hours of reading + sandbox time end to end.
 
-## Stack
+## sandbox modes
 
-- Vanilla HTML, CSS, and JavaScript. No bundler, no framework.
-- [CodeMirror 6](https://codemirror.net) for the code editor, loaded from a CDN.
-- [Mermaid.js](https://mermaid.js.org) for diagrams, loaded from a CDN.
-- The Anthropic SDK is not used at runtime. Sandboxes call the API directly via `fetch`.
+Most modules ship runnable code sandboxes. Two execution modes:
 
-## Contributing
+- **In-browser JavaScript.** Structural exercises (build a tool definition, parse content blocks, write a stop_reason switch, score tool selection). Code runs in a sandboxed scope in your browser. Nothing leaves the page.
+- **BYOK Anthropic API.** "Build a real agent loop" exercises that hit the actual `/v1/messages` endpoint. You paste your Anthropic API key once; it stays in your browser's `sessionStorage` by default and clears when you close the tab. Opt into `localStorage` ("remember on this device") if you want it persistent. Requests go directly from your browser to Anthropic with the `anthropic-dangerous-direct-browser-access` header. No proxy, no logging server.
 
-The course is being authored module-by-module. Issues and pull requests welcome once the v1 curriculum is content-complete. For now, the safest contribution is reading a module, finding something wrong, and opening an issue with the page name and the line that confused you.
+Sandbox code runs in this page's context. Do not paste code from sources you do not trust.
 
-## License
+Hidden tests verify your solution. Pass = green; fail = an explanation of what is off.
+
+## stack
+
+- React 19 + Vite 7
+- MDX for module content
+- Tailwind CSS 4 for styling
+- CodeMirror 6 for the code editor
+- Mermaid for diagrams (lazy-loaded per module)
+- Anthropic API directly via `fetch` (no SDK at runtime)
+
+## progress and badges
+
+Module completion state, sandbox passes, and earned badges live in your browser's `localStorage` under the `aiae:*` namespace. Clear those keys to reset. Nothing is uploaded anywhere; there is no account, no telemetry. Single-player learning tool.
+
+## contributing
+
+The course is content-complete at v1 (25 modules, all sandboxes, full glossary). Issues and pull requests welcome. The most useful contributions: reading a module, finding something wrong or stale, and opening an issue with the module slug and the line that confused you.
+
+## security and data handling
+
+BYOK only. Course code sends your Anthropic API key only to `api.anthropic.com`. Sandbox code runs in this page's context. Do not paste code from sources you do not trust. The repo has no analytics, no error reporting, no third-party scripts at runtime. Progress data is local-only in `localStorage`.
+
+## acknowledgments
+
+Built as a study aid for the transition into AI agent engineering full-time. The running case study, [Potter](https://github.com/Mihailo2501/potter-mcp), is an open-source MCP server in the same family of projects.
+
+Visual chrome (mascot, hero illustrations, module icons, track icons, badges) generated via [OpenAI Codex CLI](https://github.com/openai/codex) using GPT image 2. Module content authored with [Claude Code](https://github.com/anthropics/claude-code).
+
+## license
 
 MIT. See [LICENSE](LICENSE).
-
-## Author
-
-Built by [Mihailo Skenzic](https://github.com/<your-github>) as a study aid for his own transition into AI agent engineering full-time. If you find it useful, that is a happy externality. If you find it wrong, please tell him.

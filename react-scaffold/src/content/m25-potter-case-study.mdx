@@ -1,0 +1,360 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  ThreeRuntimeDemo,
+  EndToEndCallStepper,
+  testTraceTheCall,
+  testDesignATool,
+  testPickRuntime
+} from './m25-potter-case-study';
+
+<ModuleHero
+  kicker="Module 25 · Potter case study"
+  title="The course's lessons assembled"
+  lead="Potter is the running case study for this course. A real MCP server, three runtimes on one npm package, ~25 tools, written with deliberate spec discipline. This module walks the architecture and the design decisions, end to end."
+  trackId="applied"
+  moduleId="m25"
+/>
+
+<Toc items={[
+  { href: '#what-it-is', label: 'What Potter is and is not' },
+  { href: '#spec-discipline', label: 'The capability spec discipline' },
+  { href: '#three-runtimes', label: 'Three runtimes on one package' },
+  { href: '#catalog', label: 'The 25-tool catalog' },
+  { href: '#browser-act', label: 'The browser-act exception' },
+  { href: '#routing', label: 'Provider routing and fallbacks' },
+  { href: '#walkthrough', label: 'Walkthrough: a research call end to end' },
+  { href: '#what-broke', label: 'What broke during the build' },
+  { href: '#deployed', label: 'The three runtimes deployed' },
+  { href: '#what-you-do', label: 'What you do with this' },
+  { href: '#potter-angle', label: 'Potter angle (meta-close)' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-it-is" num={1} title="What Potter is and is not">
+
+Potter is an MCP server. A tool layer. Roughly 25 tools that fetch data: company research, person research, LinkedIn enrichment, web scrape, web search, structured browser actions. Pure data fetching, schema-typed inputs and outputs, structured errors the agent can recover from.
+
+<Callout kind="info" title="The repo">
+Potter is open source under MIT. Source, capability spec, tool catalog, and the three runtimes all live at <a href="https://github.com/Mihailo2501/potter-mcp" target="_blank" rel="noreferrer noopener" className="text-accent-coral underline">github.com/Mihailo2501/potter-mcp</a>. Read alongside this module if you want to see the patterns described here in actual code.
+</Callout>
+
+What Potter is not:
+
+- **Not a managed agent platform.** No agent loop runs inside Potter. The harness above Potter (Claude Code, n8n, a Node script) owns the loop.
+- **Not a harness.** Potter does not consume models. The harness picks the model; Potter handles the data the model asks for.
+- **Not opinionated about model choice.** Claude, GPT, Gemini, Llama via Ollama: the MCP protocol does not care.
+- **Not stateful.** Each tool call is independent. Memory belongs to the harness.
+
+The cleanest framing: Potter is a callable. The harness decides when and how to call it. This is what makes it portable across the three GTM agents in M22 to M24, and across any MCP-speaking environment a user might pick.
+
+</Section>
+
+<Section id="spec-discipline" num={2} title="The capability spec discipline">
+
+Building Potter forced answers to most of the questions earlier modules raised. Where does the loop run? In the harness. Where do tools live? In an MCP server. What about state? In the harness. Why three runtimes? Different deployment stories.
+
+The artifact that made the project tractable was the <GLink slug="capability-spec">capability spec</GLink>. One document per major version. The shape:
+
+- **Goal.** What this version of Potter must do, in one sentence.
+- **In scope.** Tool families and specific tools. Provider integrations. Runtime shapes.
+- **Out of scope.** Things explicitly not in this version. Often longer than the in-scope list.
+- **Acceptance criteria.** Concrete, testable bullets. The version is done when the criteria pass.
+
+Why this matters:
+
+- **Coding-agent compatibility.** Module 21 covered spec-driven coding. Potter is the lived example. Each spec was handed to Claude Code; the agent implemented against it; tests caught the cases where the implementation did not match the spec.
+- **Scope control.** Without the spec, the project drifted. With it, every "while we're at it" suggestion got tested against the in-scope list. Most got rejected; a few got promoted to the next version.
+- **Documentation by accident.** The spec is the documentation. New consumers read it to understand what Potter does; new contributors read it to understand what Potter does not do.
+
+This is the discipline Module 21 recommends for any non-trivial coding work. Potter is the case study for what it looks like applied across 18 months of incremental builds.
+
+</Section>
+
+<Section id="three-runtimes" num={3} title="Three runtimes on one npm package">
+
+The same core (the tool functions) ships under three different runtime wrappers:
+
+<ThreeRuntimeDemo />
+
+Why each exists:
+
+- **MCP server.** The primary delivery shape. Used inside Claude Code, Cursor, n8n, or any MCP-speaking harness. The harness owns the loop; Potter ships the tool surface. This is how the three GTM agents in M22 to M24 consume Potter.
+- **batch-brief runtime.** A scheduled host wrapped around the tool functions. Reads a CSV or queue, calls Potter tools per row, produces a markdown brief, posts to Slack or saves to disk. Cron-driven or Inngest-triggered. M15's lessons in concrete form.
+- **Standalone CLI.** Direct surface over the tool functions for one-off interactive use. `potter research-company --domain acme.com`. Useful for debugging and for ad-hoc spot checks without firing up a harness.
+
+The shared core is what makes this tractable. The tool functions are written once. Each runtime wraps them differently: MCP exposes them via the protocol; batch-brief schedules invocations; the CLI parses argv and calls them directly. Adding a new tool means writing one function; all three runtimes pick it up.
+
+### Sandbox · Pick the runtime
+
+<Sandbox
+  id="m25-pick-runtime"
+  mode="js"
+  prompt={<>Implement <code>pickPotterRuntime(useCase)</code> returning <code>"mcp"</code>, <code>"batch-brief"</code>, or <code>"cli"</code>. Mappings: <code>"inside-claude-code-interactive"</code> -&gt; <code>"mcp"</code>; <code>"inside-cursor-interactive"</code> -&gt; <code>"mcp"</code>; <code>"nightly-enrichment-of-csv"</code> -&gt; <code>"batch-brief"</code>; <code>"weekly-funding-monitor"</code> -&gt; <code>"batch-brief"</code>; <code>"one-off-terminal-command"</code> -&gt; <code>"cli"</code>. Default for unknown kinds: <code>"mcp"</code>.</>}
+  starter={`function pickPotterRuntime(useCase) {
+  // your code here
+}
+
+return pickPotterRuntime;`}
+  test={testPickRuntime}
+  hint={<>Object map plus a fallback to "mcp" (the default for anything inside an MCP-aware harness).</>}
+/>
+
+</Section>
+
+<Section id="catalog" num={4} title="The 25-tool catalog">
+
+Tools are namespaced by family:
+
+- **`potter_research_*`.** Per-entity research: company, person, decision-maker discovery.
+- **`potter_browser_*`.** Browser actions: open, click, fill, scroll, screenshot, extract, plus the special-case act.
+- **`potter_linkedin_*`.** LinkedIn-specific: profile, company page, posts, post summarization.
+- **`potter_web_*`.** Generic web: search, scrape, crawl.
+- **`potter_extract_structured`** for ad-hoc structured extraction.
+- **`potter_find_decision_maker`** for org-chart traversal.
+
+Naming follows Module 10's discipline:
+
+- **Namespace prefix.** `potter_*` so the model groups them mentally and the harness's tool dispatcher routes correctly.
+- **Verb-then-noun.** `research_company`, `find_decision_maker`, `summarize_linkedin_posts`. Reads as actions.
+- **Snake case.** Consistent across the catalog.
+
+Each tool description carries:
+
+- **What it does.** One sentence.
+- **When to call it.** The shape of inputs that fit. "Use when the user asks about funding history, latest raises, or investor lists."
+- **When NOT to call it.** Disambiguation against neighbors. "Do not use for general firmographic data; use `potter_research_company` for that."
+- **Output shape hint.** What the agent gets back, at the level the agent needs to know.
+
+### Sandbox · Validate a Potter tool definition
+
+<Sandbox
+  id="m25-design-a-tool"
+  mode="js"
+  prompt={<>Implement <code>validateToolDefinition(def)</code> returning <code>{`{ ok, errors }`}</code>. Rules: <code>name</code> must start with <code>"potter_"</code> (namespace prefix). <code>description</code> must be at least 50 characters and contain both a "when" beat and a "do not" beat (case-insensitive). <code>inputSchema</code> must be an object with <code>type: "object"</code>, a non-empty <code>properties</code> object, and a non-empty <code>required</code> array. Errors should mention which rule failed.</>}
+  starter={`function validateToolDefinition(def) {
+  const errors = [];
+  // your code here
+  return { ok: errors.length === 0, errors };
+}
+
+return validateToolDefinition;`}
+  test={testDesignATool}
+  hint={<>Four checks. Namespace: <code>def.name?.startsWith('potter_')</code>. Description length: <code>def.description.length &gt;= 50</code>. Beats: <code>/when/i.test(def.description)</code> and <code>/do not/i.test(def.description)</code>. Schema: properties non-empty, required non-empty.</>}
+/>
+
+</Section>
+
+<Section id="browser-act" num={5} title="The browser-act exception">
+
+`potter_browser_act` is the one place where Potter calls an LLM internally. Module 13 covered the principle; this section covers the implementation.
+
+The tool's job: navigate dynamic UIs (Cloudflare challenges, login redirects, A/B-rotating layouts) where deterministic selectors fail.
+
+The flow:
+
+1. Tool receives a goal: "click the Sign In button" or "find the price on this product page".
+2. The tool's runtime takes a screenshot of the current page state via Stagehand.
+3. The runtime calls Claude with a tightly-scoped prompt: "Given this screenshot and goal, choose the next action."
+4. Claude returns an action (click + selector, fill + value, scroll, navigate).
+5. Stagehand executes the action.
+6. The tool returns a structured result to the harness.
+
+The harness's main loop never sees the screenshot. The model decision is scoped, isolated, and disposable. The agent gets a clean structured result back.
+
+Why this is the only exception:
+
+- **Screenshots are expensive.** 1,500 to 3,000 tokens each. Returning them to the harness's loop on every browser action would inflate context dramatically.
+- **Vision capability is not portable.** Some harnesses are not vision-capable. Coupling Potter's browser tool to the harness's vision means Potter only works in some harnesses.
+- **The decision is small.** The model is choosing a Stagehand primitive, not making a multi-step plan. Scoped LLM call inside the tool is the right grain.
+
+The discipline that makes this safe:
+
+- **Tightly scoped prompt.** The model is told exactly what action shapes are valid; it is not free to reason about anything else.
+- **Bounded action set.** Click, fill, scroll, navigate. Not arbitrary code execution.
+- **Logged and budgeted.** Each browser-act call is metered; cost caps apply; structured events go to the audit trail.
+
+</Section>
+
+<Section id="routing" num={6} title="Provider routing and fallbacks">
+
+Potter's tools route to providers. The default routing:
+
+- **Proxycurl** for LinkedIn data (research_person, linkedin_profile, linkedin_company, linkedin_posts).
+- **Apify** as fallback for LinkedIn data when Proxycurl 429s, plus primary for some scraping flows.
+- **Firecrawl** for general web scrape and crawl.
+- **Stagehand + Browserbase** for browser actions.
+- **Custom search providers** for web_search.
+
+The fallback shape: each tool declares a primary provider plus an ordered list of secondaries. On primary failure (rate limit, 5xx, timeout), the tool routes to the next available provider, normalizes the result back to Potter's output shape (so the consumer cannot tell which provider served the call), and returns.
+
+The result: tools degrade gracefully. A Proxycurl outage does not stop research; it routes through Apify. The harness sees the same response shape; the audit trail records which provider served the call so observability can detect rising fallback rates.
+
+</Section>
+
+<Section id="walkthrough" num={7} title="Walkthrough: a research call from start to finish">
+
+Trace one user request from prompt to final answer:
+
+<EndToEndCallStepper />
+
+The eight stages map to layers the course has been building toward:
+
+- Stage 1 to 2: harness loop ([Module 01](/m/primitives), [M07](/m/harnesses)).
+- Stage 3: MCP layer ([M06](/m/api-sdk-cli-mcp)).
+- Stage 4: schema validation at the boundary ([M10](/m/tool-design), [M12](/m/structured-output)).
+- Stage 5: provider routing with fallback ([M19](/m/observability)).
+- Stage 6 to 7: tool result back into the loop, model continues.
+- Stage 8: structured events, run_id correlation ([M18](/m/security-adversarial), [M19](/m/observability)).
+
+Every architectural pattern from M01 through M21 shows up at least once.
+
+### Sandbox · Trace the call
+
+<Sandbox
+  id="m25-trace-the-call"
+  mode="js"
+  prompt={<>Implement <code>traceCall(eventLog)</code> taking an array of structured events and returning a summary <code>{`{ harness, tools, providers, totalCost, totalLatency }`}</code>. <code>harness</code> is the name from the <code>harness.route</code> event. <code>tools</code> is the array of distinct tool names from <code>tool.call</code> events. <code>providers</code> is the array of distinct provider names from <code>provider.invoke</code> events. <code>totalCost</code> is the sum of <code>cost_usd</code> across all events. <code>totalLatency</code> is the sum of <code>latency_ms</code> across all events.</>}
+  starter={`function traceCall(eventLog) {
+  // your code here
+}
+
+return traceCall;`}
+  test={testTraceTheCall}
+  hint={<>Single pass over the array. Pull the harness from any event with <code>kind === 'harness.route'</code>. Use Sets for distinct tool and provider names. Sum cost and latency across every event.</>}
+/>
+
+</Section>
+
+<Section id="what-broke" num={8} title="What broke during the build, what got rewritten">
+
+Real lessons from the lived build:
+
+- **Tool descriptions started too short.** Early descriptions read like one-liners. The model picked them inconsistently. The fix was the discipline this course teaches: descriptions are prompts; longer with explicit when/do-not beats works better.
+- **Output shapes drifted across providers.** Proxycurl returned slightly different fields than Apify; the agent had to handle two shapes. The fix was provider-side normalization at the Potter boundary so the agent always sees one shape.
+- **Errors were free text.** Early `tool_result.is_error` events returned "request failed: 500". The agent did not know whether to retry, fall back, or abort. Structured errors with kind ([Module 10](/m/tool-design)) were retrofitted; recovery improved.
+- **Memory crept into tools.** A first attempt at "remember the last query" inside a tool broke the no-state rule. Removed; memory moved to the harness; portability returned.
+- **The browser-act exception almost grew.** Several tools were proposed with internal LLM calls "for similar reasons". Each was rejected after weighing the alternative; only browser-act met the bar. The discipline of "what is the alternative" kept the exception singular.
+- **batch-brief originally lived as a separate package.** Splitting it into its own npm package made shared utility code awkward. Merged back into the main repo as a separate runtime entry; cleaner.
+
+</Section>
+
+<Section id="deployed" num={9} title="The three runtimes deployed">
+
+How each runtime actually ships:
+
+- **MCP server.** Local stdio inside Claude Code (`.mcp.json` references `npx potter-mcp`). HTTP transport for remote use (`https://mcp.potter.example/mcp`). Auth varies by deployment.
+- **batch-brief runtime.** Inngest workflow consuming a Postgres queue or scheduled cron. Reads a CSV or DB table, calls Potter tools per row in parallel, persists results, posts a Slack digest plus PDF artifacts to R2. M15 patterns concretely.
+- **Standalone CLI.** Distributed via npm; runs anywhere there is Node. `npx potter research-company --domain acme.com` for ad-hoc use; scripted from shell when needed.
+
+Each runtime emits structured events to the same logging surface. The audit trail does not care which runtime served the call; the events look the same.
+
+</Section>
+
+<Section id="what-you-do" num={10} title="What you do with this">
+
+The course's lessons assemble into Potter. They also assemble into M22, M23, and M24. The reader's homework is to assemble them into something of their own.
+
+A few patterns worth carrying:
+
+- **Write the spec first.** [M21](/m/coding-agents) is the rule; Potter is the proof.
+- **Tools are descriptions plus schemas.** [M10](/m/tool-design). Potter's catalog is what tool design at scale looks like in production.
+- **Memory belongs to the harness.** [M11](/m/memory-retrieval). Potter has none; that is what makes it portable.
+- **Structured outputs everywhere.** [M12](/m/structured-output). Every Potter call returns typed data; every consumer parses without surprises.
+- **Background work is its own runtime.** [M15](/m/async-agents). batch-brief is what M15 looks like wrapped around a tool layer.
+- **Cost lives in the harness; tool layers are cheap.** [M17](/m/cost-economics). Potter's cost is provider fees; the harness pays the LLM bill.
+- **Narrow surfaces are easier to defend.** [M18](/m/security-adversarial). Potter does not write to anything outside its declared providers.
+- **Observability is shipped events; aggregation lives at the edge.** [M19](/m/observability). Potter logs; the harness aggregates.
+
+You do not need to build Potter. You can build something narrower or broader; you can build it on top of different providers; you can pick a different harness. The course's lessons survive all of that. The point is the discipline, not this specific tool.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">The course closes here</h3>
+
+    <p>Every architectural pattern from M01 through M21 shows up in Potter at least once. The agent loop in M01 is what runs in Claude Code while consuming Potter. The tool design discipline in M10 is what shapes Potter's 25-tool catalog. The "no LLM inside MCP except browser-act" rule is the rule that makes Potter portable. The background runtime in M15 is batch-brief. The MCP layer in M06 is Potter's primary delivery shape. M22, M23, and M24 are three different agents that all consume Potter as their tool layer.</p>
+
+    <p>The course closes here because Potter is what the course's lessons look like assembled into one real project. Twenty-five modules of theory, three working agents, one underlying tool layer. The reader has the same materials Mihailo had when he started: an LLM API, an MCP protocol, a few provider integrations, a coding agent, and a few opinionated rules about where state lives and how tools should be designed.</p>
+
+    <p>Build something of your own. Write the spec first. Keep it narrow. Ship the hardest 80% before adding any of the other 20%. The discipline travels; the specific stack does not. The next agent worth shipping is the one you have not started yet.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-capability-spec" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">capability spec</p><p className="text-sm text-ink-700">A locked document defining what a major version of a tool layer must do, with concrete acceptance criteria.</p></div>
+  <div id="glossary-three-runtime" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">three-runtime pattern</p><p className="text-sm text-ink-700">Shipping the same core under three deployment wrappers (MCP, batch, CLI) for different consumption shapes.</p></div>
+  <div id="glossary-namespace-prefix-potter" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">namespace prefix</p><p className="text-sm text-ink-700">Tool names beginning with the layer's identifier (potter_*) to disambiguate at scale.</p></div>
+  <div id="glossary-browser-act-exception" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">browser-act exception</p><p className="text-sm text-ink-700">The one Potter tool that calls an LLM internally, used for dynamic UI navigation.</p></div>
+  <div id="glossary-provider-fallback" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">provider fallback</p><p className="text-sm text-ink-700">Routing a request to a secondary provider when the primary fails or rate-limits.</p></div>
+  <div id="glossary-spec-discipline" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">spec discipline</p><p className="text-sm text-ink-700">The practice of writing the spec first, locking acceptance, then implementing.</p></div>
+  <div id="glossary-mcp-server-potter" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">MCP server (Potter)</p><p className="text-sm text-ink-700">The Potter runtime exposing tools via the Model Context Protocol.</p></div>
+  <div id="glossary-batch-brief" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">batch-brief</p><p className="text-sm text-ink-700">Potter's background runtime for scheduled enrichment jobs.</p></div>
+  <div id="glossary-stagehand-integration" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Stagehand integration</p><p className="text-sm text-ink-700">How Potter wraps Stagehand for browser automation inside potter_browser_act.</p></div>
+  <div id="glossary-proxycurl" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Proxycurl</p><p className="text-sm text-ink-700">LinkedIn data provider used as Potter's primary research source.</p></div>
+  <div id="glossary-apify" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Apify</p><p className="text-sm text-ink-700">Web scraping platform Potter uses as a fallback to Proxycurl.</p></div>
+  <div id="glossary-firecrawl" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Firecrawl</p><p className="text-sm text-ink-700">Web crawl provider Potter uses for general web research.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m25-q1" question="1. Why three runtimes, not one?">
+Different consumption shapes. MCP for inside-harness use, batch-brief for scheduled jobs, CLI for direct interactive use. One core (the tool functions) under three wrappers; each wrapper handles its own input shape and delivery. Adding a tool means adding a function; all three runtimes pick it up.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q2" question="2. Why is the capability spec the load-bearing artifact?">
+It locks acceptance criteria before implementation. The coding agent (Claude Code) implements against it; reviews check the diff against the spec; future contributors read the spec to learn what is in scope. Without it, the project drifts and every "while we're at it" suggestion becomes a fight.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q3" question='3. What does "no LLM inside MCP except browser-act" actually buy you?'>
+Portability. Potter runs identically in any MCP-speaking harness because the harness owns the loop. Memory and model choice live one layer up. Coupling LLM calls into the tool layer would make Potter expensive, slow, and tied to specific harness vision capabilities; the rule prevents it.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q4" question="4. Why is browser-act the exception?">
+Returning screenshots through MCP and back to the harness's loop inflates context (1,500 to 3,000 tokens each) and couples Potter to the harness's vision capabilities. A scoped LLM call inside the tool is cheaper and more reliable for that specific case. The rule survives because the alternative is genuinely worse.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q5" question="5. How does Potter handle provider failures?">
+Routing with fallback. Each tool declares a primary provider plus an ordered list of secondaries. On primary failure (rate limit, 5xx, timeout), the tool routes to the next available provider, normalizes the result back to Potter's output shape so the consumer cannot tell which provider served the call, and returns. The audit trail records which provider served each call so observability can detect rising fallback rates.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q6" question="6. What lives in the harness, not in Potter, and why?">
+Memory, model choice, audit logging, user authentication, rate limiting, scheduling. Harness-layer concerns. Coupling them to Potter would break portability across harnesses. Potter ships clean structured tool calls; the harness owns the rest of the experience.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q7" question="7. A reader wants to build something like Potter. First step?">
+Write the capability spec. Lock acceptance criteria. Start with 3 to 5 tools maximum; grow only when the spec demands it. The discipline of the spec is what makes the project tractable to build with a coding agent and tractable to maintain after.
+</CheckQuestion>
+
+<CheckQuestion id="m25-q8" question="8. How does Potter relate to M22-M24?">
+M22 (LinkedIn outbound) calls Potter for per-lead research. M23 (funding monitor) calls Potter for per-company deep research. M24 (meeting prep) calls Potter for per-attendee briefs. Three different agents, one Potter. The same tool surface powers three workflows that look unrelated at first glance.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You finished the course. Twenty-five modules, five tracks, one running case study. From the LLM call all the way through to a real tool layer powering three working GTM agents. The lessons travel; what you build with them is up to you.
+
+<CompleteBanner moduleId="m25" />
+
+</Section>
+
+<ModuleNav prevSlug="gtm-agent-3" prevTitle="Module 24 · GTM agent: meeting prep" />

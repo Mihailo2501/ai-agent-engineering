@@ -1,0 +1,356 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  SignalLayerDemo,
+  IncidentReplayStepper,
+  testPickSignals,
+  testShouldAlert,
+  testCorrelate
+} from './m19-observability';
+
+<ModuleHero
+  kicker="Module 19 · Observability and deployment"
+  title="More signals than a normal service"
+  lead="Observability for agents is not application metrics with extra steps. Tokens, latency, tool selection accuracy, escalations, hallucination rate. Different signals, different alerts, different runbooks."
+  trackId="production"
+  moduleId="m19"
+/>
+
+<Toc items={[
+  { href: '#signals', label: 'The signal list' },
+  { href: '#logging', label: 'Logging: structured events end to end' },
+  { href: '#tracing', label: 'Tracing across multi-step agents' },
+  { href: '#alerts', label: 'Alerts that matter' },
+  { href: '#dashboards', label: 'Dashboards' },
+  { href: '#replay', label: 'Replay and debugging' },
+  { href: '#hallucination', label: 'Hallucination detection in production' },
+  { href: '#deployment', label: 'Deployment patterns' },
+  { href: '#slos', label: 'SLOs for agents' },
+  { href: '#runbook', label: 'The runbook' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="signals" num={1} title="The signal list for agent observability">
+
+A traditional service has p50 and p99 latency, error rate, throughput. An agent service needs all of that plus a layer of agent-specific signals. The list:
+
+- **Tokens used.** Per call, per session, aggregated. The cost story ([Module 17](/m/cost-economics)) lives here.
+- **Latency per turn.** Not just end-to-end; per-API-call, per-tool-call, per-stage. Aggregate latency hides where time actually goes.
+- **stop_reason distribution.** `end_turn` (normal completion), `max_tokens` (truncated), `tool_use` (paused for tool), `stop_sequence` (explicit stop). A rising max_tokens rate signals output bloat or schema mismatch.
+- **Tool success rate per tool.** A tool whose error rate spiked is a clear signal; aggregate error rate hides per-tool problems.
+- **Retries.** Same tool retried. A rising retry rate is upstream instability or a bad change in the tool's policy.
+- **Escalations to human.** [Module 15](/m/async-agents) introduced this; the rate of escalations is a quality signal.
+- **Judged quality.** [Module 16](/m/evaluation) production sampling. Rolling-window scores indicate drift.
+- **Gate denials.** [Module 18](/m/security-adversarial). A spike is either an attack or an agent regression; investigate before suppressing.
+
+<SignalLayerDemo />
+
+</Section>
+
+<Section id="logging" num={2} title="Logging: structured events end to end">
+
+Free-text logs do not correlate across multi-step agent runs. <GLink slug="structured-event">Structured events</GLink> with stable field names do.
+
+The pattern: every step in the agent loop emits one JSON event. Log to stdout in development; ship to OpenTelemetry collectors or hosted platforms in production.
+
+<CodeBlock lang="ts">{`// One event per step.
+log({
+  event: 'tool.call',
+  run_id: 'run_2026_05_01_abc123',
+  step_id: 'step_004',
+  timestamp: '2026-05-01T08:14:23.412Z',
+  agent_version: '2.4.1',
+  model: 'claude-sonnet-4-6',
+  tool_name: 'research_company',
+  tool_args: { domain: 'acme.com' },          // PII redacted upstream
+  tool_result_status: 'ok',
+  tool_result_size_bytes: 1240,
+  latency_ms: 412,
+  cost_usd: 0.018
+});`}</CodeBlock>
+
+What every event needs:
+
+- **<GLink slug="run-id">run_id</GLink>** as the correlation id. Stitches a multi-step run together across the flat log stream.
+- **timestamp** for sorting and time-series analysis.
+- **event type** ("tool.call", "model.call", "gate.decision", "escalation"). Stable strings that downstream queries match.
+- **structured payload** with named fields, not interpolated strings.
+
+What not to log:
+
+- **Raw PII.** Redact at the boundary; logged values should already be safe ([Module 18](/m/security-adversarial)).
+- **Full prompts and full responses by default.** Sample at a configurable rate. Always-log everything balloons storage and creates retention liability.
+- **Secrets.** API keys, tokens, internal URLs. Treat as a code-review-worthy mistake when they show up.
+
+</Section>
+
+<Section id="tracing" num={3} title="Tracing across multi-step agents">
+
+Distributed-tracing patterns adapt to agent flows: a <GLink slug="trace-span">span</GLink> per turn, child spans per tool call, attributes for the agent-specific signals.
+
+The 2026 stack:
+
+- **<GLink slug="otel">OpenTelemetry</GLink>.** Vendor-neutral standard. The GenAI semantic conventions (gen_ai.* attribute namespace) are stabilizing. Most observability vendors accept OTel out of the box.
+- **<GLink slug="langfuse">Langfuse</GLink>.** Open-source LLM observability. Strong on agent traces, prompt management, and dataset capture for eval. Often paired with self-hosted Postgres.
+- **<GLink slug="helicone">Helicone</GLink>.** Hosted gateway and observability. Sits between your code and the model API; logs every call automatically. Useful for getting visibility without instrumenting your own code.
+- **Inngest, Trigger.dev built-in tracing.** If you are already on these for background work ([Module 15](/m/async-agents)), their UI handles trace, replay, and step-level debugging natively.
+
+The choice depends on stack alignment: if you are already on OTel, lean on it. If you want LLM-specific UX, Langfuse and Helicone give you that. The principle that holds across all of them: trace once, query everywhere; do not lock all observability into one vendor.
+
+</Section>
+
+<Section id="alerts" num={4} title="Alerts that matter">
+
+Alert on what would page someone at 2 AM. The list, by category:
+
+- **Latency.** p99 turn latency exceeding the SLO; sustained for at least 5 minutes (avoid pager fatigue from spikes).
+- **Error rate.** Tool error rate exceeding 1% for 10 minutes; agent-level error rate exceeding 0.5%.
+- **Cost burn.** Daily spend exceeding the budget pace; per-user spend cap fires; cache hit rate dropping below the modeled assumption (Module 17).
+- **Quality drift.** Rolling-window judged-quality score dropping more than X% over the last N samples ([Module 16](/m/evaluation)).
+- **Hallucination drift.** Factuality rate dropping after a model change.
+- **Gate denials.** Spike in denied actions: either an attack or a regression. Both worth investigating.
+- **Escalation rate.** Climbing escalation rate signals declining agent quality or upstream issues.
+
+Alert thresholds are use-case-specific. Start with conservative thresholds, tune down false positives by investigating each one, accept that the first month is noisy.
+
+### Sandbox · Build a baseline-drift alert
+
+<Sandbox
+  id="m19-design-alert"
+  mode="js"
+  prompt={<>Implement <code>shouldAlert(metric)</code> returning <code>true</code> when the alert should fire. Inputs: <code>{`{ name, current, baseline, threshold }`}</code>. Latency and cost metrics alert when <code>current &gt; baseline * (1 + threshold)</code> (strict greater-than). Quality metrics alert when <code>current &lt; baseline * (1 - threshold)</code> (strict less-than).</>}
+  starter={`function shouldAlert(metric) {
+  // your code here
+}
+
+return shouldAlert;`}
+  test={testShouldAlert}
+  hint={<>Branch on <code>metric.name</code>. If it includes <code>quality</code>, compare with <code>baseline * (1 - threshold)</code>; otherwise compare with <code>baseline * (1 + threshold)</code>. The threshold edge itself should not fire.</>}
+/>
+
+</Section>
+
+<Section id="dashboards" num={5} title="Dashboards">
+
+One dashboard per concern. Mixing them produces a wall of charts no one reads.
+
+The four canonical dashboards:
+
+- **Cost.** Spend over time, by feature, by user, by model. Cache hit rate. Top 10 highest-cost users. Forecast vs actual.
+- **Quality.** Judged quality over time, by use case, by model version. Hallucination rate. Escalation rate. Eval suite pass rate per release.
+- **Reliability.** Latency percentiles per turn and per tool. Tool success rate. Retry rate. stop_reason distribution.
+- **Security.** Gate decisions over time. Top denied categories. Audit-log gaps (if any). Anomalous user activity.
+
+What a useful dashboard looks like:
+
+- **Headline metric prominent.** One large number with the trend arrow. The on-call sees it first.
+- **Time-series with sensible windows.** Last 1 hour, last 24 hours, last 7 days. Configurable; defaults sane.
+- **Slicing.** Filter by version, by feature, by user segment. The aggregate hides the interesting slices.
+- **Direct link to runbook.** From the dashboard to the runbook; from the runbook to the queries; no clicking around.
+
+</Section>
+
+<Section id="replay" num={6} title="Replay and debugging">
+
+<GLink slug="replay">Replay</GLink> lets you re-execute a failed agent run from persisted state. Worth its weight in gold during incidents.
+
+What makes replay possible:
+
+- **Persisted run state.** Every API call's input and output is stored, indexed by run_id (Module 15).
+- **Stable inputs.** Tool results, model versions, system prompts, all captured. A replay can use the original tool results (deterministic) or re-call live tools (stochastic).
+- **Sampling-aware.** Even with temperature 0, sampling produces variance. Replay matches "approximately" rather than "exactly".
+
+How to use it:
+
+- **Reproduce a bug.** A user reports an issue; pull their run by run_id; replay; see what the agent did.
+- **Test a fix.** Apply the fix locally; replay against the same inputs; confirm the new behavior.
+- **Add a regression test.** Capture the replayed input as a behavioral eval case (Module 16) so the bug cannot return.
+
+The infrastructure cost is real (storage, indexing, retention policy) but the debugging time saved usually pays for it within the first big incident.
+
+### Sandbox · Correlate events by run_id
+
+<Sandbox
+  id="m19-correlate-by-run"
+  mode="js"
+  prompt={<>Implement <code>correlate(events)</code> taking an array of events each with <code>run_id</code> (string) and <code>timestamp</code> (number). Return an object keyed by <code>run_id</code> whose values are arrays of events sorted ascending by <code>timestamp</code>. Order in the output array is by timestamp, not by input order.</>}
+  starter={`function correlate(events) {
+  // your code here
+}
+
+return correlate;`}
+  test={testCorrelate}
+  hint={<>Build an object: for each event, push into the array under <code>events[event.run_id]</code> (initialize if missing). At the end, sort each array by <code>(a, b) =&gt; a.timestamp - b.timestamp</code>.</>}
+/>
+
+</Section>
+
+<Section id="hallucination" num={7} title="Hallucination detection in production">
+
+The signal that most teams add last because it is the hardest to measure. The patterns:
+
+- **Factuality checks.** For agents that answer factual questions, run a separate model call that asks "is this claim supported by the cited sources?" Score the response.
+- **Grounding scores.** When the agent is using RAG ([Module 11](/m/memory-retrieval)), score how strongly the response is grounded in retrieved context. A high-temperature answer with low grounding is a hallucination candidate.
+- **Confidence signals.** Some models expose token-level log probabilities; very low per-token confidence in a "factual" turn is a tell.
+- **Sample and judge.** Production sampling (Module 16) catches drift over time, including hallucination drift.
+
+Mitigations:
+
+- **Force citations.** Tool-use extraction patterns ([Module 12](/m/structured-output)) work for citations: the agent must cite sources and the validator checks they exist.
+- **Refusal training.** A well-prompted agent says "I do not know" when it does not. Test this in your eval suite.
+- **Surface-to-human thresholds.** When confidence is low or grounding is weak, escalate; do not fabricate.
+
+</Section>
+
+<Section id="deployment" num={8} title="Deployment patterns: shadow, canary, blue-green">
+
+The same patterns as services, with a twist: model-version rollout.
+
+- **<GLink slug="shadow-traffic">Shadow traffic</GLink>.** Send a copy of production requests to the new version without serving its responses. Compare outputs offline. Useful for validating a new model or prompt without user exposure.
+- **<GLink slug="canary">Canary deployment</GLink>.** Roll out to a small fraction (1 to 5%) of traffic. Monitor latency, cost, judged quality, escalations between canary and baseline. If any regress, hold; if all hold or improve, expand.
+- **Blue-green.** Two full environments; switch traffic atomically. Useful for big changes; less useful for incremental improvements.
+- **Feature flags.** Per-user or per-tenant ramp. Slow rollouts with explicit kill switches when something goes wrong.
+
+The model-version case specifically:
+
+- **Pin model versions.** Sonnet 4.6 stays Sonnet 4.6 until you explicitly upgrade.
+- **Run the eval suite** against the new version on the golden dataset before any user sees it.
+- **Canary 5% of traffic** for 24 to 72 hours, watching production sampling scores against baseline.
+- **Expand or roll back** based on the metrics. "It feels right" is not a metric.
+
+</Section>
+
+<Section id="slos" num={9} title="SLOs for agents">
+
+A <GLink slug="slo">Service Level Objective</GLink> is the target reliability metric. For agents, the practical set:
+
+- **Latency SLO.** "p99 turn latency under X seconds for 99% of requests over the last 30 days." Pick X based on the use case (chat: 5-10s; voice: under 1s).
+- **Quality SLO.** "Median judged quality over 4.0 on a 1-5 scale, p95 over 3.0, on golden set re-runs." Quality SLOs are harder to commit to externally; usually internal targets.
+- **Cost SLO.** "Average per-user cost stays under $X/month at the projected user base." Internal target, not user-facing.
+- **Error rate SLO.** "Agent-level error rate under 0.5%, including unrecoverable tool failures."
+
+The discipline: every SLO has an owner, a dashboard, and a runbook. SLO breach is an incident, not a "we will look at it next week" item. SLOs without consequences are vibes.
+
+### Sandbox · Pick the signal set
+
+<Sandbox
+  id="m19-pick-signal-set"
+  mode="js"
+  prompt={<>Implement <code>pickSignals(layer)</code> returning the right signal list for each layer. Use exactly these strings (order matters for the verifier): <code>"cost"</code> -&gt; <code>{`["tokens_used", "cost_usd"]`}</code>; <code>"quality"</code> -&gt; <code>{`["judged_quality"]`}</code>; <code>"reliability"</code> -&gt; <code>{`["p50_latency", "p99_latency", "tool_success_rate", "retries", "stop_reason_distribution", "escalations"]`}</code>; <code>"security"</code> -&gt; <code>{`["gate_denials"]`}</code>.</>}
+  starter={`function pickSignals(layer) {
+  // your code here
+}
+
+return pickSignals;`}
+  test={testPickSignals}
+  hint={<>Object map keyed by layer. Return the exact arrays; the verifier sorts before comparing so order does not matter, but the set must match.</>}
+/>
+
+</Section>
+
+<Section id="runbook" num={10} title="The runbook: when an agent goes off">
+
+A standard runbook for agent incidents:
+
+1. **Acknowledge.** Note the alert, start the incident timer.
+2. **Triage.** What is the symptom (latency spike, error spike, quality drop, cost spike)? What is the scope (one tool, one feature, all users)?
+3. **Check upstream.** Anthropic status page; provider status pages for any third-party tools. Many agent incidents are upstream incidents.
+4. **Replay a representative failed run.** Persisted state lets you reproduce; replay narrows the cause to "agent decided wrong" vs "tool returned wrong" vs "model outage".
+5. **Mitigate.** Roll back the recent change, disable the failing tool, fail over to a secondary model. Restore service before fixing.
+6. **Fix.** Make the actual change. Test against the failing case. Deploy via canary.
+7. **Add an eval case.** The bug is now a test case. Future runs against the eval suite catch the regression.
+8. **Postmortem.** What happened, what you fixed, what you will change to prevent recurrence. Share within the team.
+
+<IncidentReplayStepper />
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter logs events; the harness aggregates</h3>
+
+    <p>Every Potter MCP tool call emits a structured event: run_id, tool name, arguments (with PII redacted at the boundary), result status, provider used, latency, cost. The events go to whatever logging surface the harness provides (stdout for development, OpenTelemetry collector in production, Langfuse or Helicone in observability-platform setups).</p>
+
+    <p>Potter does not run its own dashboard or alerting. It ships the events and trusts the consuming environment to aggregate. This decision keeps Potter portable across observability stacks (Langfuse here, Helicone there, raw OpenTelemetry elsewhere) without coupling. The Module 19 lesson applies: tool layers ship signals; harnesses aggregate and alert.</p>
+
+    <p>The corollary: when something goes wrong with a Potter call, the harness's run_id correlation is what stitches the agent's decision to Potter's tool execution. Without that correlation, the agent's "I called research_company" is a separate event from Potter's "research_company executed in 412ms with status ok"; with it, both events join into one timeline.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-structured-event" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">structured event</p><p className="text-sm text-ink-700">A log line with explicit fields (run_id, tool_name, status), not a free-text message.</p></div>
+  <div id="glossary-run-id" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">run_id</p><p className="text-sm text-ink-700">Correlation identifier shared by all events from a single agent run.</p></div>
+  <div id="glossary-trace-span" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">span (trace)</p><p className="text-sm text-ink-700">A unit of work with start/end timestamps, used for distributed tracing.</p></div>
+  <div id="glossary-otel" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">OpenTelemetry</p><p className="text-sm text-ink-700">Open standard for tracing, metrics, logs.</p></div>
+  <div id="glossary-langfuse" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Langfuse</p><p className="text-sm text-ink-700">Open-source LLM observability platform.</p></div>
+  <div id="glossary-helicone" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Helicone</p><p className="text-sm text-ink-700">Hosted LLM observability and gateway service.</p></div>
+  <div id="glossary-slo" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">SLO</p><p className="text-sm text-ink-700">Service Level Objective. The target reliability metric (e.g. 99% of requests under 2s).</p></div>
+  <div id="glossary-canary" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">canary deployment</p><p className="text-sm text-ink-700">Rolling out a change to a small fraction of traffic before full rollout.</p></div>
+  <div id="glossary-shadow-traffic" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">shadow traffic</p><p className="text-sm text-ink-700">Sending a copy of production traffic to a new version without serving its responses.</p></div>
+  <div id="glossary-replay" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">replay</p><p className="text-sm text-ink-700">Re-running a failed agent run from persisted state to debug.</p></div>
+  <div id="glossary-hallucination-drift" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">hallucination drift</p><p className="text-sm text-ink-700">Increase in factual error rate over time, often after a model version change.</p></div>
+  <div id="glossary-escalation-rate" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">escalation rate</p><p className="text-sm text-ink-700">Fraction of runs that surface to a human reviewer. A signal of agent quality.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m19-q1" question='1. Why is "p50 and p99 latency" not enough for an agent service?'>
+An agent has many internal stages (per-tool latency, per-model latency, retries, gate decisions). Aggregate latency hides where time actually goes. Per-stage measurements let the on-call see "the slow one is research_company at p99" rather than guessing across the whole pipeline.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q2" question="2. Most under-monitored signal in agent services?">
+Hallucination rate. Most teams add it last because it requires production sampling plus a judge eval, not just a timer or counter. The other signals can be wired up with normal telemetry; hallucination needs a model-in-the-loop pipeline that is more work to build and maintain.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q3" question="3. Why structured logging for agents specifically?">
+Free-text logs do not correlate across multi-step runs. Structured events with run_id let you reconstruct what happened during one specific run from a flat log stream. Without correlation, debugging an agent is guesswork.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q4" question="4. Replay: what makes it possible?">
+Persisted run state. Every API call's input and output is stored, so you can re-execute the run deterministically (modulo sampling variance). The infrastructure cost is real (storage, indexing, retention) but pays for itself within the first big incident.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q5" question="5. Canary deployment for an agent change: what to compare?">
+Latency, cost, judged quality, escalation rate, error rate, between canary and baseline. If any regresses meaningfully, hold the rollout. Run for at least 24 hours so you cover the time-of-day pattern; longer for changes that affect rarer cases.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q6" question="6. SLO design: what to commit to?">
+Latency for the user-facing turn (under N seconds for 99% of requests). Quality for open-ended outputs (median judged score above target on golden re-runs). Cost (internal, not user-facing). Error rate (under threshold including unrecoverable tool failures). Each SLO needs an owner, a dashboard, and a runbook.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q7" question="7. A spike in gate denials: what does it indicate?">
+Possible attack (Module 18) or an agent prompt regression where the agent is trying to do things it should not. Investigate before suppressing the alert. Suppressing without root cause is how real incidents get ignored.
+</CheckQuestion>
+
+<CheckQuestion id="m19-q8" question="8. Why does Potter not run its own observability?">
+Tool layers should be portable across observability stacks. Coupling Potter to Langfuse or Helicone breaks portability for users running on raw OpenTelemetry or any other backend. Potter ships structured events; the consuming harness aggregates them into whatever stack it uses.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You have the production-observability playbook: signals by layer, structured logging, tracing, alerts, dashboards, replay, hallucination detection, deployment patterns, SLOs, and a runbook for when things go off. Track 4 ends here. Track 5 begins with a tour of the open-source model ecosystem.
+
+<CompleteBanner moduleId="m19" nextSlug="open-source-models" nextTitle="Module 20 · Open source models and Hugging Face" />
+
+</Section>
+
+<ModuleNav prevSlug="security-adversarial" prevTitle="Module 18 · Security and adversarial" nextSlug="open-source-models" nextTitle="Module 20 · Open source models and Hugging Face" />

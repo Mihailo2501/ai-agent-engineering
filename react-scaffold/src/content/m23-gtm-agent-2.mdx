@@ -1,0 +1,330 @@
+import ModuleHero from '../components/module-hero';
+import Toc from '../components/toc';
+import Section from '../components/section';
+import CodeBlock from '../components/code-block';
+import Callout from '../components/callout';
+import GLink from '../components/g-link';
+import Mermaid from '../components/mermaid';
+import CheckQuestion from '../components/check-question';
+import PotterAngle from '../components/potter-angle';
+import Sandbox from '../components/sandbox';
+import CompleteBanner from '../components/complete-banner';
+import ModuleNav from '../components/module-nav';
+import {
+  WeeklyRunStepper,
+  ICPScoringDemo,
+  testScoreICPFit,
+  testFormatBrief,
+  testDedupeByCanonical
+} from './m23-gtm-agent-2';
+
+<ModuleHero
+  kicker="Module 23 · GTM agent: weekly funding monitor"
+  title="Monday morning, 10 raises that matter"
+  lead="Funding announcements are a warm signal: a company that just raised has hiring intent, has budget unlocking, has a story to tell. A weekly agent that surfaces fresh raises in your ICP, scores them, and delivers research-backed briefs is the difference between reading TechCrunch on Monday and shipping outreach by Tuesday."
+  trackId="applied"
+  moduleId="m23"
+/>
+
+<Toc items={[
+  { href: '#what-it-does', label: 'What this agent does and why' },
+  { href: '#ritual', label: 'The Monday-morning ritual it replaces' },
+  { href: '#sources', label: 'Funding data sources' },
+  { href: '#architecture', label: 'Architecture: cron, dedupe, queue' },
+  { href: '#icp', label: 'ICP filter and relevance scoring' },
+  { href: '#research', label: 'Deep research per company' },
+  { href: '#brief', label: 'Brief generation' },
+  { href: '#eval', label: 'Eval: golden ICP test set' },
+  { href: '#deploy', label: 'Deployment' },
+  { href: '#what-broke', label: 'Iteration log: what broke' },
+  { href: '#potter-angle', label: 'Potter angle' },
+  { href: '#glossary', label: 'Glossary' },
+  { href: '#check', label: 'Check yourself' },
+  { href: '#complete', label: 'Mark complete' }
+]} />
+
+<Section id="what-it-does" num={1} title="What this agent does and why">
+
+The agent scans the past week's funding activity, filters to your <GLink slug="icp-filter">ICP</GLink>, deeply researches the ones worth chasing, and delivers a ranked brief to Slack every Monday morning. Not "here are 200 raises this week." Ten you should care about, with one paragraph each on why.
+
+Funding data is public but scattered. TechCrunch, Crunchbase, RSS feeds, news APIs, paid services. Each source has its own shape, its own rate limits, its own gaps. The agent's job is to consolidate, dedupe across weeks, filter to relevance, deeply research the survivors, and surface them ranked.
+
+The shape that survives:
+
+- Cron fires Monday early morning.
+- Sources pulled in parallel, normalized to a flat raise schema.
+- <GLink slug="canonical-url">Canonical URLs</GLink> dedupe across weeks.
+- ICP filter scores each raise on a 1 to 5 rubric.
+- Survivors above threshold get deep Potter research.
+- Brief assembled per company with the structured-output pattern from Module 12.
+- Slack delivery at 09:00 with PDF attachments for the top hits.
+
+</Section>
+
+<Section id="ritual" num={2} title="The Monday-morning ritual it replaces">
+
+Without the agent: 90 minutes of manual scrolling. TechCrunch's funding section. Crunchbase News. LinkedIn for founder activity. The salesperson reads, copy-pastes interesting ones into a doc, opens 12 tabs to research, decides on the top 3, drafts the outreach. By the time it ships, it is Wednesday and the news is stale.
+
+With the agent: 5 minutes Monday morning. The salesperson opens Slack, reads the digest, picks the top 2, copies the brief's <a href="/m/gtm-agent-3#glossary-conversation-hook">conversation hook</a> into M22's outbound flow. The outreach ships by Tuesday morning while the funding announcement is still fresh.
+
+The compounding effect is what makes this defensible. A salesperson who runs this every week for a year has seen 50 weekly digests; they recognize patterns, build instincts for which raises convert, and the agent's ranking improves as you add hand-corrected scores back into the rubric.
+
+</Section>
+
+<Section id="sources" num={3} title="Funding data sources comparison">
+
+The 2026 landscape, briefly:
+
+- **Crunchbase API.** Structured; the canonical record. As of 2026 it is enterprise-only with custom-quote pricing (typically tens of thousands per year); the free tier was retired in 2025. Best when budget genuinely allows; otherwise rely on the alternatives below.
+- **Apify scrapers.** TechCrunch, VentureBeat, Information have community scrapers maintained on Apify. Pay-per-result; cheap at small scale. Good for "I want last week's raises" without committing to Crunchbase pricing.
+- **NewsAPI / Google News.** Broad coverage, noisy. Useful as a supplement; not as a primary. Filter aggressively or you drown in irrelevant headlines.
+- **RSS feeds.** Free; rate-limit-friendly; lossy. Curate a list of major outlets (TechCrunch funding RSS, Crunchbase News RSS, Axios Pro Rata) and stitch together.
+- **SignalHire, Coresignal, Predict Leads.** Paid services aggregating funding signals plus enrichment. More expensive than Apify; less flexible than the raw sources. Worth evaluating if budget exists and time-to-deploy matters.
+
+The recommended starting stack: Apify for TechCrunch, plus an RSS feed of the major outlets. Add Crunchbase if signal quality justifies the cost; add a paid signal service when you outgrow the home-grown approach. Verify pricing and rate limits when you commit; this part of the stack moves.
+
+</Section>
+
+<Section id="architecture" num={4} title="Architecture: cron, dedupe, queue">
+
+The four-stage flow:
+
+- **Cron fires Monday 06:00 local.** Inngest cron is the durability primitive ([Module 15](/m/async-agents)). The run gets a stable id like `funding-2026-W18` so retries dedupe.
+- **Sources pulled in parallel.** Apify, RSS, Crunchbase if configured. Each source returns a flat list of raises.
+- **Dedupe by canonical URL.** Compare against the previous week's set stored in Postgres. Canonical URL is lowercase, no `www`, no trailing slash. New raises survive; recurring entries drop.
+- **Per-survivor research queue.** Each survivor is queued for deep research as a separate step. Inngest's step boundaries make this resumable: a research step that crashes is retried without re-running the dedupe.
+
+<Mermaid chart={`flowchart LR
+  CRON["Inngest cron<br/>Mon 06:00"] --> FETCH["fetch raises<br/>parallel"]
+  FETCH --> DEDUPE["dedupe by<br/>canonical URL"]
+  DEDUPE --> ICP["ICP filter<br/>score 1-5"]
+  ICP -->|score >= 4| RESEARCH["deep research<br/>fan-out"]
+  ICP -->|score < 4| DROP["drop"]
+  RESEARCH --> BRIEF["assemble brief"]
+  BRIEF --> DELIVER["Slack<br/>Mon 09:00"]`} />
+
+### Sandbox · Dedupe by canonical URL
+
+<Sandbox
+  id="m23-dedupe-by-canonical"
+  mode="js"
+  prompt={<>Implement <code>dedupeRaises(currentWeek, lastWeek)</code> where each raise has shape <code>{`{ company_name, company_url, raise_amount, round_type }`}</code>. Compute the canonical form of <code>company_url</code> as <strong>lowercase, strip <code>www.</code> prefix, strip trailing slash</strong>. Return only the entries from <code>currentWeek</code> whose canonical URL is not present in <code>lastWeek</code>.</>}
+  starter={`function canonicalUrl(url) {
+  // your code here: lowercase, strip protocol, strip www., strip trailing slash
+}
+
+function dedupeRaises(currentWeek, lastWeek) {
+  // your code here
+}
+
+return dedupeRaises;`}
+  test={testDedupeByCanonical}
+  hint={<>Build a Set of canonical URLs from lastWeek, then filter currentWeek by checking each canonical URL against the set. <code>url.toLowerCase().replace(/^https?:\/\//, '').replace(/^www\./, '').replace(/\/$/, '')</code> handles all three rules.</>}
+/>
+
+</Section>
+
+<Section id="icp" num={5} title="ICP filter and relevance scoring">
+
+The ICP is encoded as a structured rubric, not as a paragraph of vibes. The four dimensions:
+
+- **Industry.** A list of acceptable values: B2B SaaS, Developer Tools, AI Infrastructure, etc.
+- **Stage.** Seed, Series A, Series B, Series C. Sometimes a single stage; usually a range.
+- **Geography.** US, EU, APAC, LATAM, or specific countries.
+- **Headcount range.** A min and max. Excludes both companies too small to be a buyer and too large to be a fit.
+
+<ICPScoringDemo />
+
+The scoring rule that survives: each matching dimension adds one point to a base of one. Zero matches is a 1, all four matches is a 5. The rationale string lists which fields matched. Cheap classifier turn (Haiku); cheap to run on hundreds of raises per week.
+
+### Sandbox · Score ICP fit
+
+<Sandbox
+  id="m23-score-icp-fit"
+  mode="js"
+  prompt={<>Implement <code>scoreICPFit({"{ company, icp }"})</code> returning <code>{`{ score: 1-5, rationale: string }`}</code>. Inputs: <code>company</code> has <code>industry</code>, <code>stage</code>, <code>geography</code>, <code>headcount</code>. <code>icp</code> has <code>industries</code> (array), <code>stages</code> (array), <code>geographies</code> (array), <code>headcountMin</code>, <code>headcountMax</code>. Each matching dimension adds 1 to a base score of 1; range 1 to 5. Rationale lists which fields matched.</>}
+  starter={`function scoreICPFit({ company, icp }) {
+  let matches = 0;
+  const reasons = [];
+  // your code here: check each of the four dimensions
+  return {
+    score: matches + 1,
+    rationale: matches === 0 ? 'No ICP fields match' : reasons.join(', ')
+  };
+}
+
+return scoreICPFit;`}
+  test={testScoreICPFit}
+  hint={<>Four checks: <code>icp.industries.includes(company.industry)</code>, <code>icp.stages.includes(company.stage)</code>, <code>icp.geographies.includes(company.geography)</code>, <code>company.headcount &gt;= icp.headcountMin &amp;&amp; company.headcount &lt;= icp.headcountMax</code>. Increment <code>matches</code> on each hit; push a label into <code>reasons</code>.</>}
+/>
+
+</Section>
+
+<Section id="research" num={6} title="Deep research per company">
+
+The threshold for deep research is conservative: only raises with ICP score 4 or higher proceed. Below that, the tail is mostly noise; deep-researching everything wastes Potter calls.
+
+For each survivor, in parallel:
+
+- **`potter_research_company`.** Firmographic data, recent news, hiring trends, product hints.
+- **`potter_research_person`.** The listed founder or CEO. Role, tenure, recent activity.
+- **`potter_web_scrape`.** The funding announcement page itself. Quotes, named investors, any specifics the announcement contains that the news API summary did not surface.
+- **`potter_summarize_linkedin_posts`.** Last five LinkedIn posts from the founder. Personality, topics they care about, any conversation hooks worth referencing in outreach.
+
+The fan-out is parallel; the assembly is sequential. With Inngest's step boundaries, a research step that fails is retried independently of the others; a brief that fails is regenerated without re-doing the research.
+
+</Section>
+
+<Section id="brief" num={7} title="Brief generation: structured output">
+
+[Module 12](/m/structured-output) tool-use extraction applied. The schema:
+
+<CodeBlock lang="ts">{`interface Brief {
+  company: string;             // e.g. "Acme AI"
+  raise_amount: string;        // e.g. "$15M"
+  round_type: string;          // e.g. "Series A"
+  why_relevant: string;        // 2-3 sentences on ICP fit
+  decision_maker: string;      // name + role + linkedin
+  hook_for_outbound: string;   // one specific thing to reference
+  recommended_action: string;  // "outbound this week" / "monitor for Q2"
+}`}</CodeBlock>
+
+The agent calls a `submit_brief` tool with that exact shape; `tool_choice` forces the call; the result is a typed object the rest of the pipeline consumes.
+
+The `hook_for_outbound` field is what makes this composable with M22. The hook becomes the personalization anchor in the outbound message; the brief's recommended_action decides whether the company even goes into the outbound batch this week.
+
+### Sandbox · Format the brief
+
+<Sandbox
+  id="m23-format-brief"
+  mode="js"
+  prompt={<>Implement <code>formatBrief(rawResearch)</code> taking a research blob and returning the canonical brief object with all required fields: <code>company</code>, <code>raise_amount</code>, <code>round_type</code>, <code>why_relevant</code>, <code>decision_maker</code>, <code>hook_for_outbound</code>, <code>recommended_action</code>. All fields must be non-empty strings. Reasonable defaults: pull <code>company</code> from <code>raw.company_name</code>, <code>raise_amount</code> and <code>round_type</code> from raw, decision_maker as <code>"{`${name} (${role})`}"</code> from <code>raw.founder</code>, hook_for_outbound from <code>raw.recent_post</code> or a sensible fallback.</>}
+  starter={`function formatBrief(raw) {
+  // your code here
+}
+
+return formatBrief;`}
+  test={testFormatBrief}
+  hint={<>Map each input field to the output, with fallbacks for missing data. The verifier checks all 7 fields are non-empty strings and that <code>decision_maker</code> contains the founder's name.</>}
+/>
+
+</Section>
+
+<Section id="eval" num={8} title="Eval: golden ICP test set">
+
+20 real raises from the past quarter, each with a hand-scored ICP relevance. Run the agent against the same inputs; compare its scores to the human scores; aggregate.
+
+Drift threshold: agent agrees with human scoring on 80% or more of cases (within 1 point). Below that, the rubric is too strict, too loose, or the source data quality has shifted.
+
+The eval also catches:
+
+- **<GLink slug="icp-overfit">ICP overfit</GLink>.** A first-run rubric that rejects warm leads humans would have approved. Loosen the rubric or add a manual override list.
+- **Source quality regressions.** When the dedupe-pass rate or ICP-pass rate drops sharply week over week, the source feed has likely changed shape.
+- **Brief consistency.** Same raise re-run produces broadly the same brief. If the brief drifts wildly, prompt caching is missing or the temperature is too high.
+
+</Section>
+
+<Section id="deploy" num={9} title="Deployment">
+
+The full deployment shape:
+
+- **Inngest** for the cron and durability ([Module 15](/m/async-agents)). Cron primitive fires Monday 06:00 local. Step boundaries persist intermediate results.
+- **Postgres** (or a flat JSON file at small scale) for the previous-week dedupe set. Cleared monthly to keep storage bounded.
+- **Slack** for delivery. A scheduled message fires at 09:00 (after the 06:00 run completes). The message body is the ranked list with brief snippets.
+- **Cloudflare R2 + Remotion** for the PDF artifacts attached to top hits. Reuses the GTM Movie pipeline. The PDF goes to R2; a signed URL goes into the Slack message.
+- **Observability** ([Module 19](/m/observability)). Structured events per stage, run_id correlation, alarm on weekly run not completing by 09:00.
+
+### Sandbox · Trace one weekly run
+
+The full lifecycle visualized:
+
+<WeeklyRunStepper />
+
+</Section>
+
+<Section id="what-broke" num={10} title="Iteration log: what broke">
+
+The real failure modes:
+
+- **Dedupe across weeks needed canonical URL, not name.** "Acme AI" became "Acme.ai" became "ACME" became a rebrand. URLs are stable enough; names drift.
+- **Crunchbase rate limit kicked in mid-batch.** The fix: Apify fallback when Crunchbase 429s. The agent retries the missing companies through the secondary source.
+- **ICP filter overfit on the first run.** Too narrow. The rubric was rejecting healthy fits because the headcount range was off by 25. Loosened; eval drift caught it within two weeks.
+- **PDF brief generation tied to Cloudflare R2.** Reusing the existing GTM Movie pipeline saved building it again. The trade was that R2 latency at upload time occasionally pushed the Slack delivery past 09:00. Fix: pre-render the PDFs as soon as the brief is finalized, not at delivery time.
+- **Founder-on-LinkedIn lookup occasionally returned the wrong person.** Same name, different person. Mitigation: cross-check the founder URL against the company's listed founders before treating the profile as authoritative.
+
+</Section>
+
+<div id="potter-angle">
+  <PotterAngle>
+    <h3 className="font-heading text-2xl text-ink-900">Potter is the per-company research engine</h3>
+
+    <p>The funding source feeds the lead (here is a name and a URL). Potter turns it into a research-backed brief. Per company the agent calls <code>potter_research_company</code>, <code>potter_research_person</code> for the founder, <code>potter_web_scrape</code> for the funding announcement page, <code>potter_web_search</code> for last-month coverage, and <code>potter_summarize_linkedin_posts</code> for recent activity.</p>
+
+    <p>Without Potter, this agent would re-implement four data integrations Mihailo already shipped: Proxycurl for LinkedIn data, Apify for company news, Firecrawl for web scrape, and a search API of choice. Each would have its own rate limits, its own auth story, its own error shapes. Potter collapses that into one MCP surface; the harness focuses on the agent loop and the ICP rubric.</p>
+
+    <p>The split that holds: Potter does data; the harness does scheduling, dedupe, ICP scoring, brief assembly, Slack delivery, R2 PDF rendering. Potter is portable across the three GTM agents in this track; the same tool surface that powers the funding monitor also powers M22 outbound and M24 meeting prep.</p>
+  </PotterAngle>
+</div>
+
+<Section id="glossary" title="Glossary">
+
+<div className="grid gap-4 md:grid-cols-2">
+  <div id="glossary-icp-filter" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ICP filter</p><p className="text-sm text-ink-700">Structured criteria (industry, stage, geography, headcount) used to qualify leads before deep research.</p></div>
+  <div id="glossary-relevance-score" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">relevance score</p><p className="text-sm text-ink-700">1-5 ranking of how well a company matches the ICP, with one-sentence rationale.</p></div>
+  <div id="glossary-canonical-url" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">canonical URL</p><p className="text-sm text-ink-700">Normalized form of a company URL (lowercase, no www, trailing slash stripped) used as a stable identifier.</p></div>
+  <div id="glossary-funding-source" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">funding source</p><p className="text-sm text-ink-700">The data API or scraper providing this week's raise list. Crunchbase, Apify, NewsAPI, RSS.</p></div>
+  <div id="glossary-weekly-digest" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">weekly digest</p><p className="text-sm text-ink-700">The Monday Slack message containing the ranked list of qualified raises.</p></div>
+  <div id="glossary-brief" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">brief</p><p className="text-sm text-ink-700">The structured one-page summary per qualified company, fed to outbound or sales.</p></div>
+  <div id="glossary-icp-overfit" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">ICP overfit</p><p className="text-sm text-ink-700">Filter so narrow it rejects warm leads. Detected via eval drift.</p></div>
+  <div id="glossary-inngest-cron" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">Inngest cron</p><p className="text-sm text-ink-700">Inngest's cron primitive for durable scheduled jobs.</p></div>
+  <div id="glossary-dedupe-runs" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">dedupe across runs</p><p className="text-sm text-ink-700">Preventing the same company from surfacing in two consecutive weekly digests.</p></div>
+  <div id="glossary-brief-pdf" className="rounded-xl bg-clay-bg p-5 shadow-soft"><p className="font-heading text-lg text-ink-900">brief PDF</p><p className="text-sm text-ink-700">Long-form artifact (using Remotion) attached to the Slack message for top hits.</p></div>
+</div>
+
+</Section>
+
+<Section id="check" title="Check yourself">
+
+<CheckQuestion id="m23-q1" question="1. Why dedupe by canonical URL instead of company name?">
+Names drift: DBAs, rebrands, casing variations, abbreviations. Canonical URL (lowercase, no www, trailing slash stripped) is stable across weeks and across sources. Using the URL as the dedupe key sidesteps every name-variant problem.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q2" question="2. ICP filter: rubric or freeform?">
+Rubric. Industry, stage, geography, headcount range as structured fields. Freeform "vibe match" does not survive eval and breaks comparisons week over week. The rubric is what makes drift detectable.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q3" question="3. Funding source recommendation for a small budget?">
+Apify scrapers for TechCrunch's funding section plus an RSS feed of major outlets. Add Crunchbase later if signal quality justifies the cost. Verify pricing on the day you commit; this part of the stack moves.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q4" question="4. How does the brief feed M22?">
+The brief's hook_for_outbound field becomes the personalization anchor in M22's outbound message. The brief's recommended_action decides whether the company even enters the outbound batch this week. Shared schema is the contract between agents.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q5" question="5. Why durable execution (Inngest) over plain cron?">
+Cron has no retry. A failed weekly run silently produces nothing; the salesperson opens Slack at 09:00 to no message and has no signal that something failed. Inngest retries failed steps, resumes from the last completed boundary, and surfaces failure into your observability stack.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q6" question="6. PDF brief generation: why Remotion when Slack supports markdown?">
+Reusing an existing pipeline (GTM Movie's Remotion plus Cloudflare R2). Plus PDFs land cleaner in CRMs and email follow-ups than markdown does. Slack still gets the markdown summary; the PDF is the artifact for the long-form brief.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q7" question="7. Eval drift threshold?">
+Agent agrees with hand-scored relevance on 80%+ of cases (within 1 point). Below that, retune the ICP rubric, check for source quality issues, or check whether the underlying model has shifted behavior on classification turns.
+</CheckQuestion>
+
+<CheckQuestion id="m23-q8" question="8. How does this agent stay cheap at scale?">
+Filter aggressively before Potter calls. Score 200 raises per week with cheap LLM (Haiku for the classifier turn), only deep-research the top 10 to 20. Each Potter call has provider cost; the ICP filter is what keeps that cost bounded.
+</CheckQuestion>
+
+</Section>
+
+<Section id="complete" title="Mark this module complete">
+
+You shipped the funding monitor: Apify and RSS sources, canonical-URL dedupe, ICP rubric scoring, per-company Potter research, structured brief, Slack delivery with R2 PDF artifacts. The next agent flips the trigger one more time: from cron-driven monitoring to event-driven meeting prep.
+
+<CompleteBanner moduleId="m23" nextSlug="gtm-agent-3" nextTitle="Module 24 · GTM agent: meeting prep" />
+
+</Section>
+
+<ModuleNav prevSlug="gtm-agent-1" prevTitle="Module 22 · GTM agent: cold email drafter via Gmail drafts" nextSlug="gtm-agent-3" nextTitle="Module 24 · GTM agent: meeting prep" />
