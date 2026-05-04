@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { lazy, Suspense, useMemo, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, useMemo, type ComponentType } from 'react';
 import { Link, useParams } from 'react-router';
 import { getModuleBySlug } from '../data/modules';
 
@@ -34,6 +34,10 @@ export function ModulePage() {
     const loader = loaderForSlug(mod.slug);
     return loader ? lazy(loader) : null;
   }, [mod]);
+
+  useEffect(() => {
+    window.scrollTo({ top: 0, behavior: 'auto' });
+  }, [slug]);
 
   if (!mod) {
     return (

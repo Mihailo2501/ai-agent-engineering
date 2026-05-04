@@ -273,25 +273,32 @@ export function HarnessCodeWalkthrough() {
       <p className="mb-4 text-sm text-ink-700">
         Every harness in existence is a variation on this code. The differences (UI, files, permissions, hooks, subagents) wrap around it; the loop itself is the loop.
       </p>
-      <div className="space-y-2">
-        {lines.map((line, i) => (
-          <div
-            key={i}
-            className="overflow-hidden rounded-xl bg-[#1A2530] text-white"
-          >
-            <div className="flex gap-3 px-4 py-2 font-mono text-xs">
-              <span className="w-6 shrink-0 text-right text-white/40">{i + 1}</span>
-              <span className="break-words whitespace-pre-wrap">
+      <div className="space-y-4">
+        <pre className="overflow-x-auto rounded-xl bg-[#1A2530] p-4 font-mono text-xs leading-relaxed text-white">
+          <code>
+            {lines.map((line, i) => (
+              <span key={i} className="block min-h-[1.2em]">
+                <span className="mr-3 inline-block w-6 text-right text-white/40">{i + 1}</span>
                 {line.code || ' '}
               </span>
-            </div>
-            {line.note ? (
-              <p className="border-t border-white/10 bg-white/[0.04] px-4 py-2 pl-[3.25rem] text-[0.78rem] leading-snug text-white/70">
-                {line.note}
-              </p>
-            ) : null}
-          </div>
-        ))}
+            ))}
+          </code>
+        </pre>
+        <ol className="space-y-1 text-xs">
+          {lines.map((line, i) =>
+            line.note ? (
+              <li
+                key={i}
+                className="flex gap-3 rounded-lg bg-white/60 px-3 py-2"
+              >
+                <span className="w-6 shrink-0 text-right font-mono text-ink-500">
+                  {i + 1}
+                </span>
+                <span className="text-ink-700">{line.note}</span>
+              </li>
+            ) : null
+          )}
+        </ol>
       </div>
     </section>
   );
