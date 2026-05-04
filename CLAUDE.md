@@ -21,7 +21,7 @@ These were worked through earlier — do not re-litigate without Mihailo's expli
 - 25 modules across 5 tracks. Build pace flexible: conceptual modules can batch 3-5 per session. The three GTM agent builds in Track 5 (M22 personalized cold email drafter via Gmail drafts, M23 weekly funding monitor, M24 meeting prep) are one session each because they involve real working agents against Mihailo's actual stack (Potter, Gmail API, Anthropic API, calendar webhooks). M22 originally targeted HeyReach but was rewritten to drop paid SaaS dependencies; the loop patterns survived.
 - **Design system: Clay-inspired (locked 2026-04-30).** Reference mockup at `docs/design/aiae-home-clay.png` (gitignored, local-only). Pastel multi-hue palette, rounded XL panels, soft drop shadows, friendly robot mascot, per-track pastel grouping. Dark Terminal aesthetic is fully retired; old M01-M03 visual styling will be replaced during the React port. Do not propose alternative aesthetic directions without explicit ask.
 - localStorage-based progress + badges. Minimum-viable gamification: progress bar, completion checkmarks, light badges. Skip XP, levels, streaks.
-- **Badge taxonomy: 14 total** (5 track-complete + 5 milestones + 4 themed module badges). No per-module badges for the other 21. Renders as a 2x7 grid on the home page badges shelf. Full list and rationale in memory at `project_badges_locked.md`. The starter 7-badge set in `react-scaffold/src/data/badges.ts` will be replaced when artwork is generated.
+- **Badge taxonomy: 14 total** (5 track-complete + 5 milestones + 4 themed module badges). No per-module badges for the other 21. Renders as a 2x7 grid on the home page badges shelf. Full list and rationale in memory at `project_badges_locked.md`. The starter 7-badge set in `src/data/badges.ts` will be replaced when artwork is generated.
 - Real CodeMirror 6 sandboxes for hands-on exercises. Two execution modes:
   - In-browser JS for structural exercises (build a tool definition, parse content blocks, write a stop_reason switch)
   - BYOK Anthropic API for "build a real agent loop" exercises. User's key lives in `sessionStorage` by default (clears on tab close); a "remember on this device" toggle opts into `localStorage`. Sent with `anthropic-dangerous-direct-browser-access: true`.
@@ -91,29 +91,31 @@ Old → new mapping for the existing M01-M03 content: M01 stays M01; old M02 (Ag
 ├── CONTRIBUTING.md
 ├── SECURITY.md
 ├── CODE_OF_CONDUCT.md
+├── DESIGN-TOKENS.md                 # Clay palette and typography reference
 ├── .gitignore
 ├── .github/workflows/ci.yml         # typecheck + build on push/PR
 ├── docs/design/                     # design references (gitignored mockups)
-└── react-scaffold/                  # the app
-    ├── package.json
-    ├── vite.config.ts
-    ├── index.html                   # SPA shell (head, OG, favicon)
-    ├── public/
-    │   └── illustrations/           # PNGs for modules, tracks, stats, badges
-    └── src/
-        ├── routes.tsx               # all routes
-        ├── pages/                   # home, module pages, glossary
-        ├── components/              # layout, sandbox, mermaid, footer, etc
-        ├── content/                 # one .mdx + one .tsx per module
-        ├── data/                    # modules.ts manifest, badges.ts, glossary
-        └── lib/                     # progress, badges, sandbox/anthropic-client
+├── launch-video/                    # Remotion launch video (gitignored, marketing artifact)
+├── package.json
+├── vite.config.ts
+├── tsconfig.json
+├── index.html                       # SPA shell (head, OG, favicon)
+├── public/
+│   └── illustrations/               # PNGs for modules, tracks, stats, badges
+└── src/
+    ├── routes.tsx                   # all routes
+    ├── pages/                       # home, module pages, glossary
+    ├── components/                  # layout, sandbox, mermaid, footer, etc
+    ├── content/                     # one .mdx + one .tsx per module
+    ├── data/                        # modules.ts manifest, badges.ts, glossary
+    └── lib/                         # progress, badges, sandbox/anthropic-client
 ```
 
-File naming is kebab-case throughout. The React app is the only runtime; everything ships through Vite. No vanilla HTML at the project root.
+File naming is kebab-case throughout. The React app sits at the repo root (no nested app directory); everything ships through Vite. No vanilla HTML other than the SPA shell.
 
 ## Module authoring template
 
-Every module is one `.mdx` file plus one matching `.tsx` in `react-scaffold/src/content/`. The MDX owns prose, callouts, code blocks, mermaid diagrams, and sandbox embeds. The TSX owns interactive demo components, custom widgets, and any per-module React logic the MDX imports. Modules are listed in `src/data/modules.ts` and routed via `src/routes.tsx`.
+Every module is one `.mdx` file plus one matching `.tsx` in `src/content/`. The MDX owns prose, callouts, code blocks, mermaid diagrams, and sandbox embeds. The TSX owns interactive demo components, custom widgets, and any per-module React logic the MDX imports. Modules are listed in `src/data/modules.ts` and routed via `src/routes.tsx`.
 
 Module body structure:
 

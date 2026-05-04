@@ -5,22 +5,21 @@ AI Agent Engineering is an open-source course by Mihailo Skendzic. Maintained by
 ## repo layout
 
 ```text
-react-scaffold/
-  src/
-    components/              # shared React components
-    content/                 # module content
-      m{NN}-{slug}.mdx       # module prose and lesson content
-      m{NN}-{slug}.tsx       # module-specific interactive content
-    data/
-      modules.ts             # module manifest and ordering
+src/
+  components/              # shared React components
+  content/                 # module content
+    m{NN}-{slug}.mdx       # module prose and lesson content
+    m{NN}-{slug}.tsx       # module-specific interactive content
+  data/
+    modules.ts             # module manifest and ordering
 ```
 
-`react-scaffold/` is the SPA. Course modules live in `react-scaffold/src/content/` as `m{NN}-{slug}.mdx` and `m{NN}-{slug}.tsx` pairs. Shared components live in `react-scaffold/src/components/`. The module manifest is `react-scaffold/src/data/modules.ts`.
+The repo root is the React SPA. Course modules live in `src/content/` as `m{NN}-{slug}.mdx` and `m{NN}-{slug}.tsx` pairs. Shared components live in `src/components/`. The module manifest is `src/data/modules.ts`.
 
 ## adding or editing a module
 
-1. Create or edit the `m{NN}-{slug}.mdx` and `m{NN}-{slug}.tsx` pair in `react-scaffold/src/content/`.
-2. Add or update the module entry in `react-scaffold/src/data/modules.ts`.
+1. Create or edit the `m{NN}-{slug}.mdx` and `m{NN}-{slug}.tsx` pair in `src/content/`.
+2. Add or update the module entry in `src/data/modules.ts`.
 3. Keep module content in its own MDX and TSX pair. Do not spread module-specific content across shared files.
 4. Do not use em dashes anywhere in content. Use commas, colons, or split the sentence.
 5. Do not reference unrelated prior projects.
@@ -30,7 +29,6 @@ react-scaffold/
 ## local dev
 
 ```bash
-cd react-scaffold
 npm install
 npm run dev
 ```
@@ -38,14 +36,12 @@ npm run dev
 ## typecheck
 
 ```bash
-cd react-scaffold
 npx tsc --noEmit
 ```
 
 ## build
 
 ```bash
-cd react-scaffold
 npm run build
 ```
 

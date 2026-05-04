@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="react-scaffold/public/illustrations/mascot-hero.png" alt="AI Agent Engineering mascot" width="180" />
+  <img src="public/illustrations/mascot-hero.png" alt="AI Agent Engineering mascot" width="180" />
 </p>
 
 <p align="center">
@@ -24,7 +24,7 @@ Built around the Claude API as the reference primitive. BYOK only. Open source u
 
 ```bash
 git clone https://github.com/Mihailo2501/ai-agent-engineering.git
-cd ai-agent-engineering/react-scaffold
+cd ai-agent-engineering
 npm install
 npm run dev
 # open http://localhost:5173

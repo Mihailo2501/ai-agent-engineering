@@ -8,6 +8,11 @@ node_modules/
 .vscode/
 .idea/
 .cache/
+.vite/
 dist/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
 .claude/settings.local.json
 docs/design/
+launch-video/
