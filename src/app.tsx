@@ -1,4 +1,4 @@
-import { Outlet } from 'react-router';
+import { Outlet, ScrollRestoration } from 'react-router';
 import Footer from './components/footer';
 import ProgressStrip from './components/progress-strip';
 
@@ -10,6 +10,7 @@ export function App() {
         <Outlet />
       </main>
       <Footer />
+      <ScrollRestoration />
     </div>
   );
 }
