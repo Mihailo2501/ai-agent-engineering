@@ -1,6 +1,6 @@
 /// <reference types="vite/client" />
 
-import { lazy, Suspense, useEffect, useMemo, type ComponentType } from 'react';
+import { lazy, Suspense, useEffect, type ComponentType } from 'react';
 import { Link, useParams } from 'react-router';
 import { getModuleBySlug } from '../data/modules';
 
@@ -10,11 +10,18 @@ interface MdxModule {
 
 const mdxModules = import.meta.glob<MdxModule>('../content/*.mdx', { eager: false });
 
-function loaderForSlug(slug: string) {
+const lazyCache = new Map<string, ComponentType>();
+
+function getLazyForSlug(slug: string): ComponentType | null {
+  const cached = lazyCache.get(slug);
+  if (cached) return cached;
   const matchingPath = Object.keys(mdxModules).find(
     (path) => path.includes(`-${slug}.mdx`) || path.endsWith(`/${slug}.mdx`)
   );
-  return matchingPath ? mdxModules[matchingPath] : null;
+  if (!matchingPath) return null;
+  const Component = lazy(mdxModules[matchingPath]);
+  lazyCache.set(slug, Component);
+  return Component;
 }
 
 function ModuleLoading() {
@@ -28,12 +35,7 @@ function ModuleLoading() {
 export function ModulePage() {
   const { slug } = useParams<{ slug: string }>();
   const mod = slug ? getModuleBySlug(slug) : undefined;
-
-  const Content = useMemo(() => {
-    if (!mod) return null;
-    const loader = loaderForSlug(mod.slug);
-    return loader ? lazy(loader) : null;
-  }, [mod]);
+  const Content = mod ? getLazyForSlug(mod.slug) : null;
 
   useEffect(() => {
     window.scrollTo({ top: 0, behavior: 'auto' });
@@ -53,7 +55,7 @@ export function ModulePage() {
   if (Content) {
     return (
       <article className="space-y-10">
-        <Suspense fallback={<ModuleLoading />}>
+        <Suspense key={mod.slug} fallback={<ModuleLoading />}>
           <Content />
         </Suspense>
       </article>
